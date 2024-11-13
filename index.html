@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>時間管理與 ChatGPT 互動頁面</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background-color: #333;
+      color: #fff;
+      margin: 0;
+    }
+    .container {
+      width: 300px;
+      text-align: center;
+      background-color: #444;
+      padding: 20px;
+      border-radius: 10px;
+    }
+    .time-section, .todo-section, .chat-section, .timer-section {
+      margin: 20px 0;
+    }
+    .todo-section input[type="checkbox"] {
+      margin-right: 10px;
+    }
+    .chat-section textarea {
+      width: 100%;
+      height: 60px;
+      margin-top: 10px;
+    }
+    .chat-section button, .todo-section button, .timer-section button {
+      margin-top: 10px;
+      padding: 10px 20px;
+      background-color: #f39c12;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    /* 彈跳視窗樣式 */
+    .modal {
+      display: none; /* 初始隱藏 */
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0, 0, 0, 0.7);
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-content {
+      background-color: #fff;
+      color: #333;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      max-width: 300px;
+    }
+    .modal button {
+      margin-top: 10px;
+      padding: 8px 16px;
+      background-color: #f39c12;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 日期與時間顯示 -->
+    <div class="time-section">
+      <p id="date">日期：--/--</p>
+      <p id="day">星期：--</p>
+      <h1 id="time">時間：--:--<h1>
+    </div>
+
+    <!-- 倒數計時區 -->
+    <div class="timer-section">
+      <h3>設定倒數計時</h3>
+      <input type="number" id="timer-input" placeholder="輸入秒數" min="1">
+      <button onclick="startTimer()">開始計時</button>
+      <h1 id="timer-display">剩餘時間：--</h1>
+    </div>
+
+    <!-- 待辦清單區 -->
+    <div class="todo-section">
+      <h3>待辦清單</h3>
+      <div id="todo-list">
+        <div><input type="checkbox" onclick="completeTask(this, '論文閱讀')" /> 論文閱讀</div>
+        <div><input type="checkbox" onclick="completeTask(this, '人誌學紀錄')" /> 人誌學紀錄</div>
+        <div><input type="checkbox" onclick="completeTask(this, '做上課簡報')" /> 做上課簡報</div>
+      </div>
+      <input type="text" id="new-todo-input" placeholder="輸入新任務名稱">
+      <button onclick="addTodo()">新增待辦</button>
+    </div>
+
+    <!-- ChatGPT 輸入欄位 -->
+    <div class="chat-section">
+      <h3>ChatGPT 互動</h3>
+      <p>ChatGPT 回答，一次只會看到一個回答</p>
+      <textarea id="chat-input" placeholder="輸入問題..."></textarea>
+      <button onclick="sendMessage()">我做完了</button>
+      <div id="chat-response"></div>
+    </div>
+  </div>
+
+  <!-- 彈跳視窗 -->
+  <div class="modal" id="modal">
+    <div class="modal-content">
+      <p id="modal-message">這裡會顯示鼓勵的話</p>
+      <button onclick="closeModal()">關閉</button>
+    </div>
+  </div>
+
+  <script>
+    // 顯示日期、星期和時間
+    function updateDateTime() {
+      const now = new Date();
+      const date = `${now.getMonth() + 1}/${now.getDate()}`;
+      const days = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+      const day = days[now.getDay()];
+      const time = now.toTimeString().slice(0, 5);
+      
+      document.getElementById('date').textContent = `日期：${date}`;
+      document.getElementById('day').textContent = `星期：${day}`;
+      document.getElementById('time').textContent = `時間：${time}`;
+    }
+    setInterval(updateDateTime, 1000); // 每秒更新時間
+
+    // 全域變數，確保計時器可重置
+    let countdownInterval;
+
+    // 開始倒數計時
+    function startTimer() {
+      const timerInput = document.getElementById('timer-input').value;
+      let timeRemaining = parseInt(timerInput);
+
+      if (isNaN(timeRemaining) || timeRemaining <= 0) {
+        alert("請輸入有效的秒數！");
+        return;
+      }
+
+      // 清除之前的計時器（如果有）
+      clearInterval(countdownInterval);
+
+      // 設定倒數計時
+      countdownInterval = setInterval(() => {
+        document.getElementById('timer-display').textContent = `剩餘時間：${timeRemaining} 秒`;
+        if (timeRemaining <= 0) {
+          clearInterval(countdownInterval);
+          document.getElementById('timer-display').textContent = "時間到！";
+          sendEncouragementMessage();  // 時間到時發送鼓勵訊息
+        }
+        timeRemaining--;
+      }, 1000);
+    }
+
+    // 顯示彈跳視窗
+    function showModal(message) {
+      document.getElementById('modal-message').textContent = message;
+      document.getElementById('modal').style.display = 'flex';
+    }
+
+    // 關閉彈跳視窗
+    function closeModal() {
+      document.getElementById('modal').style.display = 'none';
+    }
+
+    // 發送鼓勵訊息
+    async function sendEncouragementMessage() {
+      const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: "冷血質疑使用者是否真正專注，無情指出倒數已經結束，對使用者的拖延感到不屑" }]
+          })
+        });
+
+        const data = await response.json();
+        if (data.choices && data.choices.length > 0) {
+          const encouragement = data.choices[0].message.content;
+          showModal(`${encouragement}`);
+        } else {
+          showModal("無法獲取鼓勵的話，請稍後再試。");
+        }
+      } catch (error) {
+        console.error("Error:", error);
+        showModal("發生錯誤，請稍後再試。");
+      }
+    }
+
+    // 打勾完成任務並呼叫 API 鼓勵
+    async function completeTask(checkbox, taskName) {
+      if (checkbox.checked) {
+        const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+        try {
+          const response = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model: "gpt-4o-mini",
+              messages: [{ role: "user", content: `我完成了${taskName}，用最銳利的語氣給我一句話提醒我「還沒資格鬆懈」，直接否定使用者的成就感。` }]
+            })
+          });
+
+          const data = await response.json();
+          if (data.choices && data.choices.length > 0) {
+            const encouragement = data.choices[0].message.content;
+            showModal(`${encouragement}`);
+          } else {
+            showModal("無法獲取鼓勵的話，請稍後再試。");
+          }
+        } catch (error) {
+          console.error("Error:", error);
+          showModal("發生錯誤，請稍後再試。");
+        }
+      }
+    }
+
+    // ChatGPT 互動 - 使用 OpenAI API 發送消息
+    async function sendMessage() {
+      const inputField = document.getElementById('chat-input');
+      const message = inputField.value.trim();
+      const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+
+      if (message === "") {
+        alert("請輸入問題！");
+        return;
+      }
+
+      try {
+        const response = await fetch("https://api.openai.com/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${apiKey}`
+          },
+          body: JSON.stringify({
+            model: "gpt-3.5-turbo",
+            messages: [{ role: "user", content: message }]
+          })
+        });
+
+        const data = await response.json();
+        if (data.choices && data.choices.length > 0) {
+          const reply = data.choices[0].message.content;
+          showModal(`ChatGPT 回覆：${reply}`);
+        } else {
+          showModal("無法獲取回覆，請稍後再試。");
+        }
+      } catch (error) {
+        console.error("Error:", error);
+        showModal("發生錯誤，請稍後再試。");
+      }
+
+      inputField.value = ""; // 清空輸入欄
+    }
+  </script>
+</body>
+</html>
