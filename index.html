@@ -177,7 +177,7 @@
 
     // 發送鼓勵訊息
     async function sendEncouragementMessage() {
-      const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+      const apiKey = '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';  // 使用您的 OpenAI API 金鑰
       try {
         const response = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
@@ -207,7 +207,7 @@
     // 打勾完成任務並呼叫 API 鼓勵
     async function completeTask(checkbox, taskName) {
       if (checkbox.checked) {
-        const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+        const apiKey = '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';  // 使用您的 OpenAI API 金鑰
         try {
           const response = await fetch("https://api.openai.com/v1/chat/completions", {
             method: "POST",
@@ -239,7 +239,7 @@
     async function sendMessage() {
       const inputField = document.getElementById('chat-input');
       const message = inputField.value.trim();
-      const apiKey = 'sk-proj-Hjp4ZzvXhiXypzwpdiwKTWLcqix994w0UmKijsvvDZe-M010fdOw4DT6HHX-M2e9mO28F0qtEsT3BlbkFJjZsq8wlD5Sxltjd1iie2Tr85fbnd07mvwJ-xq93_bp8QUAuZl1YOZ3KgxloYq2SBwd_NiLXkUA';  // 使用您的 OpenAI API 金鑰
+      const apiKey = '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';  // 使用您的 OpenAI API 金鑰
 
       if (message === "") {
         alert("請輸入問題！");
