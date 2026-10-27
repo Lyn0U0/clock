@@ -22,6 +22,8 @@ const TRAVEL_MODES = [
   { value: 'TRANSIT', label: '大眾運輸', gmaps: 'transit' },
   { value: 'WALK', label: '步行', gmaps: 'walking' }
 ];
+const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }, { id: 'member-partner', name: '伴侶' }];
+const MIN_MEMBERS = 2;
 const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#0091ff', '#d6409f', '#7c8a2e'];
 
 
@@ -33,9 +35,16 @@ const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#009
  *     days: [{ id, spots: [Spot] }],  // 陣列順序就是 Day 1、Day 2…
  *     activeDayId: dayId | OVERVIEW,
  *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 預設交通方式
- *     legModes: { 'fromSpotId->toSpotId': travelMode }        // 個別路段改用的交通方式
+ *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
+ *     members: [{ id, name }],                                // 旅伴，預設「我」與「伴侶」
+ *     expenses: [Expense]                                     // 記帳
  *   }
  *   Spot = { id, name, lat, lng, placeId, note }  // spots 陣列順序就是當天的參觀順序
+ *   Expense = {
+ *     id, title, amount, paidBy: memberId,
+ *     ref: 'spot:<spotId>' | 'leg:<fromSpotId>-><toSpotId>',  // 掛在哪張卡片上
+ *     split: 'shared' | 'personal'                             // 全員均分 / 個人自付（不列入清帳）
+ *   }
  *
  * 「Day N」與圖釘編號都從陣列位置算出，因此增刪天數或調整順序後會自動重新編號。
  * ========================================================================== */
@@ -46,7 +55,10 @@ let state = loadState();
 const ui = {
   expandedNotes: new Set(), // 展開備註欄的 spotId
   flashSpotId: null,        // 下次重繪後要閃一下的卡片
-  lastPickedDayId: null     // 新增表單預設選取的天數
+  lastPickedDayId: null,    // 新增表單預設選取的天數
+  expandedExpenses: new Set(), // 展開記帳區的卡片 ref
+  focusExpenseId: null,     // 下次重繪後要聚焦金額欄的支出
+  settleOpen: false         // 結算面板是否開啟
 };
 
 function createId(prefix) {
@@ -64,11 +76,18 @@ function createSpot({ name, lat, lng, placeId }) {
 function loadState() {
   try {
     const saved = JSON.parse(localStorage.getItem(STATE_STORAGE));
-    if (saved && Array.isArray(saved.days) && saved.days.length) return saved;
+    if (saved && Array.isArray(saved.days) && saved.days.length) return normalizeState(saved);
   } catch {
     // 讀取失敗就使用預設資料
   }
-  return migrateLegacySpots() || { days: [createDay(), createDay(), createDay()], activeDayId: OVERVIEW };
+  return normalizeState(migrateLegacySpots() || { days: [createDay(), createDay(), createDay()], activeDayId: OVERVIEW });
+}
+
+// 補上舊資料沒有的欄位（旅伴、記帳）
+function normalizeState(s) {
+  if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
+  if (!Array.isArray(s.expenses)) s.expenses = [];
+  return s;
 }
 
 // 舊版資料是 [{ id, name, day: 1~5, lat, lng }]，轉成新的 days 結構
@@ -99,6 +118,7 @@ function saveState() {
 // 每個會改變資料的操作最後都呼叫 commit()：儲存 → 重繪清單與地圖
 function commit() {
   pruneLegModes();
+  pruneExpenses();
   saveState();
   render();
 }
@@ -153,6 +173,40 @@ function getLegMode(fromSpot, toSpot) {
   return TRAVEL_MODES.find(m => m.value === value) || getTravelMode();
 }
 
+function getSpotRef(spot) {
+  return `spot:${spot.id}`;
+}
+
+function getLegRef(fromSpot, toSpot) {
+  return `leg:${getPairKey(fromSpot, toSpot)}`;
+}
+
+// 目前畫面上存在的所有卡片（景點與相鄰路段）
+function getLiveRefs() {
+  const refs = new Set();
+  state.days.forEach(day => {
+    day.spots.forEach(spot => refs.add(getSpotRef(spot)));
+    getDayLegs(day).forEach(({ from, to }) => refs.add(getLegRef(from, to)));
+  });
+  return refs;
+}
+
+function getExpensesFor(ref) {
+  return state.expenses.filter(x => x.ref === ref);
+}
+
+function getMember(memberId) {
+  return state.members.find(m => m.id === memberId) || null;
+}
+
+function getMemberName(member) {
+  return member?.name.trim() || '未命名';
+}
+
+function getSharedLabel() {
+  return state.members.length === 2 ? '雙人均分' : `${state.members.length} 人均分`;
+}
+
 function countSpots() {
   return state.days.reduce((sum, d) => sum + d.spots.length, 0);
 }
@@ -175,7 +229,10 @@ function removeDay(dayId) {
   if (index === -1 || state.days.length <= 1) return;
   const day = state.days[index];
   if (day.spots.length) {
-    const ok = confirm(`確定刪除 ${getDayLabel(index)}？\n這天的 ${day.spots.length} 個景點也會一併刪除，後面的天數會往前遞補。`);
+    const dayRefs = new Set(day.spots.map(getSpotRef).concat(getDayLegs(day).map(({ from, to }) => getLegRef(from, to))));
+    const lost = state.expenses.filter(x => dayRefs.has(x.ref) && x.amount > 0);
+    const expenseNote = lost.length ? `\n這天記錄的 ${lost.length} 筆花費（${formatMoney(sumAmounts(lost))}）也會一併刪除。` : '';
+    const ok = confirm(`確定刪除 ${getDayLabel(index)}？\n這天的 ${day.spots.length} 個景點也會一併刪除，後面的天數會往前遞補。${expenseNote}`);
     if (!ok) return;
   }
   day.spots.forEach(s => ui.expandedNotes.delete(s.id));
@@ -218,6 +275,101 @@ function pruneLegModes() {
   });
 }
 
+// 景點或路段卡片消失後，掛在上面的花費一併移除
+function pruneExpenses() {
+  const live = getLiveRefs();
+  state.expenses = state.expenses.filter(x => live.has(x.ref));
+}
+
+// 先試做會改變景點的操作；若會讓已記錄的花費失去所屬卡片，先請使用者確認，取消就還原
+function applyWithExpenseGuard(mutate, actionText) {
+  const snapshot = state.days.map(d => d.spots.slice());
+  mutate();
+  const live = getLiveRefs();
+  const lost = state.expenses.filter(x => !live.has(x.ref) && x.amount > 0);
+  if (lost.length && !confirm(`${actionText}會一併刪除 ${lost.length} 筆花費（${formatMoney(sumAmounts(lost))}），確定嗎？`)) {
+    state.days.forEach((d, i) => { d.spots = snapshot[i]; });
+    return false;
+  }
+  return true;
+}
+
+// ---------- 旅伴 ----------
+function addMember() {
+  const member = { id: createId('member'), name: `旅伴 ${state.members.length + 1}` };
+  state.members.push(member);
+  commit();
+  const input = document.querySelector(`.member-name[data-member-id="${member.id}"]`);
+  input?.focus();
+  input?.select();
+}
+
+function renameMember(memberId, name) {
+  const member = getMember(memberId);
+  if (!member) return;
+  member.name = name;
+  saveState();
+  refreshMoneyViews();
+}
+
+function removeMember(memberId) {
+  const member = getMember(memberId);
+  if (!member || state.members.length <= MIN_MEMBERS) return;
+  const paid = state.expenses.filter(x => x.paidBy === memberId);
+  if (paid.length) {
+    alert(`「${getMemberName(member)}」還有 ${paid.length} 筆付款紀錄，請先把付款人改成其他人再移除。`);
+    return;
+  }
+  state.members = state.members.filter(m => m.id !== memberId);
+  commit();
+}
+
+// ---------- 記帳 ----------
+function addExpense(ref, title) {
+  const expense = { id: createId('expense'), ref, title, amount: 0, paidBy: state.members[0].id, split: 'shared' };
+  state.expenses.push(expense);
+  ui.expandedExpenses.add(ref);
+  ui.focusExpenseId = expense.id;
+  commit();
+}
+
+// 收合時順手清掉沒填金額的空白支出
+function toggleExpenses(ref, title) {
+  if (ui.expandedExpenses.has(ref)) {
+    ui.expandedExpenses.delete(ref);
+    state.expenses = state.expenses.filter(x => x.ref !== ref || x.amount > 0);
+    commit();
+  } else if (!getExpensesFor(ref).length) {
+    addExpense(ref, title);
+  } else {
+    ui.expandedExpenses.add(ref);
+    render();
+  }
+}
+
+// 輸入時只更新資料與金額顯示，不整個重繪，避免輸入框失去焦點
+function updateExpense(expenseId, field, value) {
+  const expense = state.expenses.find(x => x.id === expenseId);
+  if (!expense) return;
+  if (field === 'amount') expense.amount = Math.max(0, Number(value) || 0);
+  else if (field === 'title') expense.title = value;
+  else if (field === 'paidBy' && getMember(value)) expense.paidBy = value;
+  else if (field === 'split' && (value === 'shared' || value === 'personal')) expense.split = value;
+  saveState();
+  refreshMoneyViews();
+}
+
+function removeExpense(expenseId) {
+  state.expenses = state.expenses.filter(x => x.id !== expenseId);
+  commit();
+}
+
+function setSettleOpen(open) {
+  ui.settleOpen = open;
+  renderSettlement();
+  if (open) document.getElementById('settle-close').focus();
+}
+
 function addSpot(dayId, spotInput) {
   const day = getDay(dayId);
   if (!day) return;
@@ -232,7 +384,8 @@ function addSpot(dayId, spotInput) {
 function removeSpot(spotId) {
   const found = findSpot(spotId);
   if (!found) return;
-  found.day.spots.splice(found.index, 1);
+  const ok = applyWithExpenseGuard(() => found.day.spots.splice(found.index, 1), `刪除「${found.spot.name}」`);
+  if (!ok) return;
   ui.expandedNotes.delete(spotId);
   commit();
 }
@@ -244,8 +397,11 @@ function moveSpot(spotId, toIndex) {
   const { day, index } = found;
   const target = Math.max(0, Math.min(toIndex, day.spots.length - 1));
   if (target === index) return;
-  const [spot] = day.spots.splice(index, 1);
-  day.spots.splice(target, 0, spot);
+  const ok = applyWithExpenseGuard(() => {
+    const [spot] = day.spots.splice(index, 1);
+    day.spots.splice(target, 0, spot);
+  }, '這樣調整順序（原本相鄰的路段會消失）');
+  if (!ok) return;
   ui.flashSpotId = spotId;
   commit();
 }
@@ -406,6 +562,62 @@ function getGoogleMapsDirUrl(fromSpot, toSpot, mode) {
 
 
 /* ==========================================================================
+ * 5b. 旅費結算（純計算）
+ *
+ * 公費（split: 'shared'）由所有旅伴平均分攤；個人自付只計入總支出，不列入清帳。
+ * 每人淨額 = 代墊的公費 − 應負擔的公費；正數代表要收錢，負數代表要付錢。
+ * ========================================================================== */
+
+function sumAmounts(expenses) {
+  return expenses.reduce((sum, x) => sum + (x.amount > 0 ? x.amount : 0), 0);
+}
+
+function formatMoney(value) {
+  return `NT$ ${Math.round(value).toLocaleString('en-US')}`;
+}
+
+function computeSettlement() {
+  const valid = state.expenses.filter(x => x.amount > 0);
+  const shared = valid.filter(x => x.split === 'shared');
+  const sharedTotal = sumAmounts(shared);
+  const share = state.members.length ? sharedTotal / state.members.length : 0;
+  const rows = state.members.map(member => {
+    const mine = valid.filter(x => x.paidBy === member.id);
+    const paid = sumAmounts(mine.filter(x => x.split === 'shared'));
+    return { member, paid, share, net: paid - share, personal: sumAmounts(mine.filter(x => x.split === 'personal')) };
+  });
+  return {
+    total: sumAmounts(valid),
+    sharedTotal,
+    personalTotal: sumAmounts(valid.filter(x => x.split === 'personal')),
+    spotTotal: sumAmounts(valid.filter(x => x.ref.startsWith('spot:'))),
+    legTotal: sumAmounts(valid.filter(x => x.ref.startsWith('leg:'))),
+    count: valid.length,
+    rows,
+    transfers: computeTransfers(rows)
+  };
+}
+
+// 欠錢的人依序轉給要收錢的人，轉帳筆數最多為（人數 − 1）
+function computeTransfers(rows) {
+  const debtors = rows.filter(r => r.net < -0.5).map(r => ({ member: r.member, left: -r.net })).sort((a, b) => b.left - a.left);
+  const creditors = rows.filter(r => r.net > 0.5).map(r => ({ member: r.member, left: r.net })).sort((a, b) => b.left - a.left);
+  const transfers = [];
+  let i = 0;
+  let j = 0;
+  while (i < debtors.length && j < creditors.length) {
+    const amount = Math.min(debtors[i].left, creditors[j].left);
+    if (Math.round(amount) > 0) transfers.push({ from: debtors[i].member, to: creditors[j].member, amount: Math.round(amount) });
+    debtors[i].left -= amount;
+    creditors[j].left -= amount;
+    if (debtors[i].left < 0.5) i++;
+    if (creditors[j].left < 0.5) j++;
+  }
+  return transfers;
+}
+
+
+/* ==========================================================================
  * 6. 畫面：側邊欄
  * ========================================================================== */
 
@@ -419,6 +631,8 @@ const ICONS = {
   TWO_WHEELER: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3"/><circle cx="18.5" cy="16.5" r="3"/><path d="M8.5 16.5h5l3-7h-4M15 6h2.5l1 3.5M5.5 16.5 9 10h4"/></svg>',
   TRANSIT: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 14h.01M15 14h.01M8 21l2-4M16 21l-2-4"/></svg>',
   WALK: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="1.5"/><path d="M10 21l2-6 3 3v3M9 12l2-5 4 3 3 1M11 7l-3 2-1 3"/></svg>',
+  wallet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h11v4M4 7v10a2 2 0 0 0 2 2h13V9H6a2 2 0 0 1-2-2zM16 14h.01"/></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>'
 };
 
@@ -428,11 +642,15 @@ function escapeHtml(str) {
 
 function render() {
   renderSummary();
+  renderMembers();
   renderModePicker();
   renderTabs();
   renderDayList();
+  renderSettleButton();
+  renderSettlement();
   if (map) syncMarkers();
   flashPendingSpot();
+  focusPendingExpense();
   refreshVisibleLegs();
 }
 
@@ -519,6 +737,7 @@ function renderSpotCard(spot, index, total) {
           <textarea data-spot-id="${spot.id}" rows="3" maxlength="500"
             placeholder="門票預約時間、必吃美食、隨手筆記…">${escapeHtml(spot.note)}</textarea>
         </div>` : ''}
+      ${renderExpenseArea(getSpotRef(spot), spot.name)}
     </li>`;
 }
 
@@ -530,7 +749,10 @@ function renderDayTravel(day) {
 // 兩個景點之間的路線卡片
 function renderLegSlot(fromSpot, toSpot) {
   return `<li class="leg" data-from="${fromSpot.id}" data-to="${toSpot.id}">
-      <div class="leg-card">${renderLegContent(fromSpot, toSpot)}</div>
+      <div class="leg-card">
+        <div class="leg-route">${renderLegContent(fromSpot, toSpot)}</div>
+        ${renderExpenseArea(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
+      </div>
     </li>`;
 }
 
@@ -568,12 +790,176 @@ function updateLegViews() {
   dayListEl.querySelectorAll('.leg').forEach(el => {
     const from = findSpot(el.dataset.from)?.spot;
     const to = findSpot(el.dataset.to)?.spot;
-    if (from && to) el.querySelector('.leg-card').innerHTML = renderLegContent(from, to);
+    if (from && to) el.querySelector('.leg-route').innerHTML = renderLegContent(from, to);
   });
   dayListEl.querySelectorAll('.day-travel').forEach(el => {
     const day = getDay(el.dataset.dayId);
     if (day) el.textContent = renderDayTravel(day);
   });
+}
+
+/* ---------- 記帳區（景點卡與交通卡共用） ---------- */
+
+// title：新增支出時預設帶入的項目名稱
+function renderExpenseArea(ref, title) {
+  const expanded = ui.expandedExpenses.has(ref);
+  const items = getExpensesFor(ref);
+  return `
+    <div class="expenses ${expanded ? 'open' : ''}" data-ref="${escapeHtml(ref)}" data-title="${escapeHtml(title)}">
+      <button class="expense-toggle ${items.some(x => x.amount > 0) ? 'has' : ''}" data-action="toggle-expenses"
+        aria-expanded="${expanded}">${renderExpenseToggle(ref)}</button>
+      ${expanded ? `
+        <div class="expense-list">
+          ${items.map(renderExpenseRow).join('')}
+          <button class="btn-text expense-add" data-action="add-expense">+ 再記一筆</button>
+        </div>` : ''}
+    </div>`;
+}
+
+function renderExpenseToggle(ref) {
+  const items = getExpensesFor(ref).filter(x => x.amount > 0);
+  if (!items.length) return ui.expandedExpenses.has(ref) ? '收合記帳' : '+ 記錄花費';
+  return `${ICONS.wallet}<span class="expense-total">${formatMoney(sumAmounts(items))}</span>`
+    + `<span class="expense-meta">${items.length} 筆</span>`;
+}
+
+function renderExpenseRow(x) {
+  const payers = state.members.map(m => `
+      <label class="pill"><input type="radio" name="payer-${x.id}" value="${m.id}" data-field="paidBy"
+        ${m.id === x.paidBy ? 'checked' : ''}><span>${escapeHtml(getMemberName(m))}</span></label>`).join('');
+  const splits = [['shared', getSharedLabel()], ['personal', '個人自付']].map(([value, label]) => `
+      <label class="pill"><input type="radio" name="split-${x.id}" value="${value}" data-field="split"
+        ${x.split === value ? 'checked' : ''}><span>${label}</span></label>`).join('');
+  return `
+    <div class="expense" data-expense-id="${x.id}">
+      <div class="expense-line">
+        <span class="expense-label">項目</span>
+        <input class="expense-title" type="text" data-field="title" value="${escapeHtml(x.title)}"
+          placeholder="支出項目" maxlength="40" aria-label="支出項目">
+        <button class="icon-btn danger" data-action="remove-expense" title="刪除此筆支出" aria-label="刪除此筆支出">${ICONS.trash}</button>
+      </div>
+      <div class="expense-line">
+        <span class="expense-label">金額</span>
+        <label class="expense-amount">
+          <span>NT$</span>
+          <input type="number" data-field="amount" value="${x.amount > 0 ? x.amount : ''}" placeholder="0"
+            min="0" step="1" inputmode="numeric" aria-label="金額">
+        </label>
+      </div>
+      <div class="expense-line expense-options">
+        <span class="expense-label">付款</span><div class="pills">${payers}</div>
+      </div>
+      <div class="expense-line expense-options">
+        <span class="expense-label">分攤</span><div class="pills">${splits}</div>
+      </div>
+    </div>`;
+}
+
+function focusPendingExpense() {
+  if (!ui.focusExpenseId) return;
+  document.querySelector(`.expense[data-expense-id="${ui.focusExpenseId}"] input[data-field="amount"]`)?.focus();
+  ui.focusExpenseId = null;
+}
+
+/* ---------- 旅伴與結算 ---------- */
+
+function renderMembers() {
+  const canRemove = state.members.length > MIN_MEMBERS;
+  document.getElementById('members').innerHTML = `
+    <span class="members-label">旅伴</span>
+    ${state.members.map(m => `
+      <span class="member">
+        <input class="member-name" data-member-id="${m.id}" value="${escapeHtml(m.name)}" maxlength="10"
+          size="${Math.max(2, [...m.name].length + 1)}" aria-label="旅伴名稱">
+        ${canRemove ? `<button class="member-remove" data-action="remove-member" data-member-id="${m.id}"
+          title="移除 ${escapeHtml(getMemberName(m))}" aria-label="移除 ${escapeHtml(getMemberName(m))}">${ICONS.close}</button>` : ''}
+      </span>`).join('')}
+    <button class="member-add" data-action="add-member" title="新增旅伴">+ 旅伴</button>`;
+}
+
+function renderSettleButton() {
+  document.getElementById('settle-total').textContent = formatMoney(computeSettlement().total);
+}
+
+// 金額、付款人、名稱變動時呼叫：只更新金額相關的顯示，不動輸入框
+function refreshMoneyViews() {
+  renderSettleButton();
+  document.querySelectorAll('.expenses[data-ref]').forEach(el => {
+    const ref = el.dataset.ref;
+    const toggle = el.querySelector('.expense-toggle');
+    toggle.innerHTML = renderExpenseToggle(ref);
+    toggle.classList.toggle('has', getExpensesFor(ref).some(x => x.amount > 0));
+  });
+  renderSettlement();
+}
+
+function renderSettlement() {
+  const drawer = document.getElementById('settle-drawer');
+  document.getElementById('settle-backdrop').hidden = !ui.settleOpen;
+  drawer.hidden = !ui.settleOpen;
+  if (!ui.settleOpen) return;
+
+  const r = computeSettlement();
+  let verdict;
+  if (!r.count) {
+    verdict = `<p class="verdict-empty">還沒有記錄花費。在景點或交通卡片下方按「+ 記錄花費」開始記帳。</p>`;
+  } else if (!r.transfers.length) {
+    verdict = `<p class="verdict-main">帳目已經平衡，不需要轉帳</p>`;
+  } else {
+    verdict = r.transfers.map(t => `
+      <p class="verdict-main">
+        <strong>${escapeHtml(getMemberName(t.from))}</strong> 需轉帳給 <strong>${escapeHtml(getMemberName(t.to))}</strong>
+        <span class="verdict-amount">${formatMoney(t.amount)}</span>
+      </p>`).join('') + `<p class="verdict-sub">完成${r.transfers.length > 1 ? '以上轉帳' : '這筆轉帳'}即可結清</p>`;
+  }
+
+  const spotPct = r.total ? Math.round(r.spotTotal / r.total * 100) : 0;
+  const legPct = r.total ? 100 - spotPct : 0;
+  const rows = r.rows.map(row => {
+    const sign = row.net > 0.5 ? 'plus' : row.net < -0.5 ? 'minus' : '';
+    const netText = sign === 'plus' ? `應收 ${formatMoney(row.net)}` : sign === 'minus' ? `應付 ${formatMoney(-row.net)}` : '已結清';
+    return `
+      <tr>
+        <th scope="row">${escapeHtml(getMemberName(row.member))}</th>
+        <td>${formatMoney(row.paid)}</td>
+        <td>${formatMoney(row.share)}</td>
+        <td class="net ${sign}">${netText}</td>
+        <td class="muted">${formatMoney(row.personal)}</td>
+      </tr>`;
+  }).join('');
+
+  document.getElementById('settle-body').innerHTML = `
+    <section class="verdict">
+      <div class="settle-eyebrow">結算建議</div>
+      ${verdict}
+    </section>
+
+    <section class="settle-section">
+      <h3>總支出總覽</h3>
+      <div class="settle-total">${formatMoney(r.total)}</div>
+      <div class="settle-split">
+        <span>${getSharedLabel()}公費 <strong>${formatMoney(r.sharedTotal)}</strong></span>
+        <span>個人自付 <strong>${formatMoney(r.personalTotal)}</strong></span>
+      </div>
+      <div class="ratio-bar" role="img" aria-label="景點 ${spotPct}%、交通 ${legPct}%">
+        <span class="ratio-spot" style="width:${spotPct}%"></span><span class="ratio-leg" style="width:${legPct}%"></span>
+      </div>
+      <div class="ratio-legend">
+        <span><i class="dot dot-spot"></i>景點 ${formatMoney(r.spotTotal)}・${spotPct}%</span>
+        <span><i class="dot dot-leg"></i>交通 ${formatMoney(r.legTotal)}・${legPct}%</span>
+      </div>
+    </section>
+
+    <section class="settle-section">
+      <h3>對帳明細</h3>
+      <div class="table-wrap">
+        <table class="settle-table">
+          <thead><tr><th scope="col">旅伴</th><th scope="col">代墊公費</th><th scope="col">應負擔</th><th scope="col">淨額</th><th scope="col">個人自付</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <p class="settle-note">公費由 ${state.members.length} 人平均分攤，每人 ${formatMoney(r.rows[0]?.share || 0)}。個人自付只計入總支出，不列入清帳。</p>
+    </section>`;
 }
 
 function flashPendingSpot() {
@@ -620,6 +1006,17 @@ document.querySelector('.sidebar').addEventListener('click', e => {
       setLegMode(leg.dataset.from, leg.dataset.to, btn.dataset.mode);
       break;
     }
+    case 'toggle-expenses':
+    case 'add-expense': {
+      const area = btn.closest('.expenses');
+      if (btn.dataset.action === 'add-expense') addExpense(area.dataset.ref, area.dataset.title);
+      else toggleExpenses(area.dataset.ref, area.dataset.title);
+      break;
+    }
+    case 'remove-expense': removeExpense(btn.closest('.expense').dataset.expenseId); break;
+    case 'add-member': addMember(); break;
+    case 'remove-member': removeMember(btn.dataset.memberId); break;
+    case 'open-settle': setSettleOpen(true); break;
     case 'retry-leg': {
       const leg = btn.closest('.leg');
       retryLeg(leg.dataset.from, leg.dataset.to);
@@ -631,7 +1028,31 @@ document.querySelector('.sidebar').addEventListener('click', e => {
 dayListEl.addEventListener('input', e => {
   if (e.target.matches('textarea[data-spot-id]')) {
     updateSpotNote(e.target.dataset.spotId, e.target.value);
+  } else if (e.target.matches('.expense [data-field]')) {
+    updateExpense(e.target.closest('.expense').dataset.expenseId, e.target.dataset.field, e.target.value);
   }
+});
+
+// ---------- 旅伴名稱 ----------
+const membersEl = document.getElementById('members');
+membersEl.addEventListener('input', e => {
+  if (!e.target.matches('.member-name')) return;
+  e.target.size = Math.max(2, [...e.target.value].length + 1);
+  renameMember(e.target.dataset.memberId, e.target.value);
+});
+// 名稱改完（失焦或按 Enter）才重繪，更新卡片上的付款人選項
+membersEl.addEventListener('change', e => {
+  if (e.target.matches('.member-name')) commit();
+});
+membersEl.addEventListener('keydown', e => {
+  if (e.target.matches('.member-name') && e.key === 'Enter') e.target.blur();
+});
+
+// ---------- 結算面板 ----------
+document.getElementById('settle-close').addEventListener('click', () => setSettleOpen(false));
+document.getElementById('settle-backdrop').addEventListener('click', () => setSettleOpen(false));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && ui.settleOpen) setSettleOpen(false);
 });
 
 // ---------- 拖曳排序（同一天內） ----------

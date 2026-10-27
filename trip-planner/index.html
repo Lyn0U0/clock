@@ -11,9 +11,15 @@
 <body>
   <aside class="sidebar">
     <div class="sidebar-header">
-      <h1>旅遊行程規劃</h1>
+      <div class="title-row">
+        <h1>旅遊行程規劃</h1>
+        <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog">
+          💰 旅費結算 <span class="settle-btn-total" id="settle-total">NT$ 0</span>
+        </button>
+      </div>
       <p>點擊地圖加入景點，拖曳或用箭頭調整每天的順序。</p>
       <div class="summary" id="summary"></div>
+      <div class="members" id="members"></div>
       <div class="mode-picker" id="mode-picker" role="radiogroup" aria-label="交通方式"></div>
     </div>
     <div class="tabs-bar">
@@ -48,6 +54,17 @@
       </div>
     </div>
   </main>
+
+  <div class="drawer-backdrop" id="settle-backdrop" hidden></div>
+  <aside class="drawer" id="settle-drawer" role="dialog" aria-modal="true" aria-labelledby="settle-title" hidden>
+    <header class="drawer-head">
+      <h2 id="settle-title">💰 旅費結算</h2>
+      <button class="icon-btn" id="settle-close" title="關閉" aria-label="關閉">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <div class="drawer-body" id="settle-body"></div>
+  </aside>
 
   <script src="app.js"></script>
 </body>

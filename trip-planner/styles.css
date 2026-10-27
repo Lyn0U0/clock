@@ -485,3 +485,245 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .tabs-bar { padding: 10px 16px; }
   .search { top: 10px; left: 10px; width: calc(100% - 20px); }
 }
+
+/* ---------- 旅伴與結算入口 ---------- */
+.title-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.title-row h1 { margin: 0; flex: 1; min-width: 0; }
+.settle-btn {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 6px 6px 12px;
+  border: 1px solid color-mix(in srgb, #f5a524 45%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, #f5a524 10%, var(--panel));
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background .15s;
+}
+.settle-btn:hover { background: color-mix(in srgb, #f5a524 18%, var(--panel)); }
+.settle-btn-total {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--panel);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.members { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.members-label { font-size: 12px; color: var(--muted); margin-right: 2px; }
+.member {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel);
+}
+.member:focus-within { border-color: var(--accent); }
+.member-name {
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  padding: 4px 4px 4px 10px;
+  outline: none;
+}
+.member-remove {
+  display: grid;
+  place-items: center;
+  width: 20px; height: 20px;
+  margin-right: 4px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.member-remove svg { width: 12px; height: 12px; }
+.member-remove:hover { background: var(--danger-bg); color: var(--danger); }
+.member-add {
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* ---------- 卡片記帳區 ---------- */
+.expenses { padding: 0 8px 8px 58px; }
+.leg-card .expenses { padding: 0 0 0 38px; }
+.expense-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.expense-toggle:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.expense-toggle.has {
+  border-style: solid;
+  border-color: color-mix(in srgb, #f5a524 40%, var(--border));
+  background: color-mix(in srgb, #f5a524 9%, var(--panel));
+  color: var(--text);
+}
+.expense-toggle svg { width: 13px; height: 13px; color: #c27c0e; }
+.expense-total { font-weight: 700; font-variant-numeric: tabular-nums; }
+.expense-meta { color: var(--muted); }
+.expense-list { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.expense {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.expense-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.expense-title, .expense-amount {
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.expense-title {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  padding: 0 8px;
+  outline: none;
+}
+.expense-amount { display: flex; align-items: center; gap: 4px; padding-left: 8px; width: 150px; max-width: 100%; }
+.expense-amount span { font-size: 11px; color: var(--muted); }
+.expense-amount input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  text-align: right;
+  padding-right: 8px;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.expense-title:focus, .expense-amount:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 110, 247, .15); }
+.expense-options { align-items: flex-start; }
+.expense-label { flex-shrink: 0; width: 28px; font-size: 11px; color: var(--muted); }
+.expense-options .expense-label { padding-top: 4px; }
+.pills { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill { position: relative; }
+.pill input { position: absolute; opacity: 0; pointer-events: none; }
+.pill span {
+  display: inline-block;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color .15s, border-color .15s, background .15s;
+}
+.pill span:hover { color: var(--text); }
+.pill input:checked + span {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--accent);
+  font-weight: 500;
+}
+.pill input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.expense-add { align-self: flex-start; }
+
+/* ---------- 結算面板 ---------- */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: rgba(20, 24, 40, .35);
+}
+.drawer {
+  position: fixed;
+  top: 0; right: 0; bottom: 0;
+  z-index: 901;
+  width: min(460px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  box-shadow: -10px 0 40px rgba(20, 24, 40, .18);
+  animation: drawer-in .22s ease;
+}
+.drawer[hidden], .drawer-backdrop[hidden] { display: none; }
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.drawer-head h2 { margin: 0; font-size: 18px; }
+.drawer-body { flex: 1; overflow-y: auto; padding: 16px 20px 32px; display: flex; flex-direction: column; gap: 14px; }
+.verdict {
+  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--text);
+  color: var(--panel);
+}
+.settle-eyebrow { font-size: 12px; letter-spacing: .08em; opacity: .7; margin-bottom: 6px; }
+.verdict-main { margin: 0; font-size: 18px; line-height: 1.6; text-wrap: balance; }
+.verdict-main + .verdict-main { margin-top: 6px; }
+.verdict-amount { display: block; font-size: 30px; font-weight: 700; color: #ffc65c; font-variant-numeric: tabular-nums; }
+.verdict-sub { margin: 8px 0 0; font-size: 13px; opacity: .7; }
+.verdict-empty { margin: 0; font-size: 14px; line-height: 1.7; opacity: .85; }
+.settle-section {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+}
+.settle-section h3 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 500; }
+.settle-total { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.settle-split { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 4px 0 14px; font-size: 13px; color: var(--muted); }
+.settle-split strong { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+.ratio-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--chip); }
+.ratio-spot { background: var(--accent); }
+.ratio-leg { background: #12a594; }
+.ratio-legend { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; margin-top: 8px; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.dot-spot { background: var(--accent); }
+.dot-leg { background: #12a594; }
+.table-wrap { overflow-x: auto; }
+.settle-table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.settle-table th, .settle-table td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--border); }
+.settle-table thead th { font-size: 11px; font-weight: 500; color: var(--muted); }
+.settle-table th:first-child { text-align: left; }
+.settle-table tbody th { font-weight: 500; }
+.settle-table tbody tr:last-child > * { border-bottom: none; }
+.settle-table .net { font-weight: 700; }
+.settle-table .net.plus { color: #12a594; }
+.settle-table .net.minus { color: var(--danger); }
+.settle-table .muted { color: var(--muted); }
+.settle-note { margin: 10px 0 0; font-size: 12px; line-height: 1.6; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .settle-btn { font-size: 12px; }
+  .expenses { padding-left: 32px; }
+  .leg-card .expenses { padding-left: 0; }
+}
