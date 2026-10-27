@@ -9,6 +9,11 @@ const GOOGLE_MAPS_API_KEY = '';
 // Advanced Marker 需要 Map ID；DEMO_MAP_ID 可用於開發，正式上線請換成自己的 Map ID
 const GOOGLE_MAP_ID = 'DEMO_MAP_ID';
 
+// 雲端同步（Firebase Firestore）：到 Firebase 主控台 → 專案設定 → 一般 → 你的應用程式，
+// 複製 firebaseConfig 物件貼在這裡（設定步驟見 README.md）。保持 null 則只存在這台裝置。
+const FIREBASE_CONFIG = null;
+const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
+
 const KEY_STORAGE = 'trip-planner-gmaps-key';
 const STATE_STORAGE = 'trip-planner-state-v2';
 const LEGACY_SPOTS_STORAGE = 'trip-planner-spots'; // 舊版（固定 5 天）的資料
@@ -47,8 +52,11 @@ const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#009
  *   }
  *
  * 「Day N」與圖釘編號都從陣列位置算出，因此增刪天數或調整順序後會自動重新編號。
+ *
+ * 共享行程（網址是 #trip-<id>）時，除了 activeDayId 以外的資料都會同步到雲端，見「9. 雲端同步」。
  * ========================================================================== */
 
+const sharedTripId = getTripIdFromHash();
 let state = loadState();
 
 // 只影響畫面、不需要儲存的狀態
@@ -58,7 +66,9 @@ const ui = {
   lastPickedDayId: null,    // 新增表單預設選取的天數
   expandedExpenses: new Set(), // 展開記帳區的卡片 ref
   focusExpenseId: null,     // 下次重繪後要聚焦金額欄的支出
-  settleOpen: false         // 結算面板是否開啟
+  settleOpen: false,        // 結算面板是否開啟
+  lastLiveRefs: new Set(),  // 上次重繪時存在的卡片 ref，用來判斷哪些卡片被刪掉
+  renderOnBlur: false       // 打字中收到雲端更新時，等離開輸入框再重繪
 };
 
 function createId(prefix) {
@@ -73,7 +83,18 @@ function createSpot({ name, lat, lng, placeId }) {
   return { id: createId('spot'), name, lat, lng, placeId: placeId || null, note: '' };
 }
 
+// 個人行程與每個共享行程各自有一份本機資料（共享行程的是雲端資料的快取）
+function getStorageKey() {
+  return sharedTripId ? `${STATE_STORAGE}:trip-${sharedTripId}` : STATE_STORAGE;
+}
+
+function getTripIdFromHash() {
+  const match = location.hash.match(/^#trip-([A-Za-z0-9]{10,40})$/);
+  return match ? match[1] : null;
+}
+
 function loadState() {
+  if (sharedTripId) return loadSharedCache();
   try {
     const saved = JSON.parse(localStorage.getItem(STATE_STORAGE));
     if (saved && Array.isArray(saved.days) && saved.days.length) return normalizeState(saved);
@@ -81,6 +102,17 @@ function loadState() {
     // 讀取失敗就使用預設資料
   }
   return normalizeState(migrateLegacySpots() || { days: [createDay(), createDay(), createDay()], activeDayId: OVERVIEW });
+}
+
+// 共享行程先顯示上次的快取，等雲端資料到了再取代
+function loadSharedCache() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(getStorageKey()));
+    if (saved && Array.isArray(saved.days) && saved.days.length) return normalizeState(saved);
+  } catch {
+    // 沒有快取就顯示空白行程
+  }
+  return normalizeState({ days: [createDay()], activeDayId: OVERVIEW });
 }
 
 // 補上舊資料沒有的欄位（旅伴、記帳）
@@ -109,10 +141,11 @@ function migrateLegacySpots() {
 
 function saveState() {
   try {
-    localStorage.setItem(STATE_STORAGE, JSON.stringify(state));
+    localStorage.setItem(getStorageKey(), JSON.stringify(state));
   } catch {
     // 無法儲存時（例如無痕模式）就只保留在記憶體中
   }
+  queueCloudSave();
 }
 
 // 每個會改變資料的操作最後都呼叫 commit()：儲存 → 重繪清單與地圖
@@ -276,17 +309,21 @@ function pruneLegModes() {
 }
 
 // 景點或路段卡片消失後，掛在上面的花費一併移除
+// 只刪除「上次畫面上還在、這次不見了」的卡片的花費；
+// 共享行程中別人新增的花費可能比它的景點早一步同步到，不能因為暫時找不到卡片就刪掉
 function pruneExpenses() {
   const live = getLiveRefs();
-  state.expenses = state.expenses.filter(x => live.has(x.ref));
+  const gone = new Set([...ui.lastLiveRefs].filter(ref => !live.has(ref)));
+  if (gone.size) state.expenses = state.expenses.filter(x => !gone.has(x.ref));
 }
 
 // 先試做會改變景點的操作；若會讓已記錄的花費失去所屬卡片，先請使用者確認，取消就還原
 function applyWithExpenseGuard(mutate, actionText) {
   const snapshot = state.days.map(d => d.spots.slice());
+  const before = getLiveRefs();
   mutate();
   const live = getLiveRefs();
-  const lost = state.expenses.filter(x => !live.has(x.ref) && x.amount > 0);
+  const lost = state.expenses.filter(x => before.has(x.ref) && !live.has(x.ref) && x.amount > 0);
   if (lost.length && !confirm(`${actionText}會一併刪除 ${lost.length} 筆花費（${formatMoney(sumAmounts(lost))}），確定嗎？`)) {
     state.days.forEach((d, i) => { d.spots = snapshot[i]; });
     return false;
@@ -643,6 +680,7 @@ function escapeHtml(str) {
 function render() {
   renderSummary();
   renderMembers();
+  renderSyncBar();
   renderModePicker();
   renderTabs();
   renderDayList();
@@ -652,6 +690,7 @@ function render() {
   flashPendingSpot();
   focusPendingExpense();
   refreshVisibleLegs();
+  ui.lastLiveRefs = getLiveRefs();
 }
 
 function renderModePicker() {
@@ -1017,6 +1056,9 @@ document.querySelector('.sidebar').addEventListener('click', e => {
     case 'add-member': addMember(); break;
     case 'remove-member': removeMember(btn.dataset.memberId); break;
     case 'open-settle': setSettleOpen(true); break;
+    case 'start-sharing': startSharing(); break;
+    case 'copy-link': copyShareLink(btn); break;
+    case 'leave-trip': leaveSharedTrip(); break;
     case 'retry-leg': {
       const leg = btn.closest('.leg');
       retryLeg(leg.dataset.from, leg.dataset.to);
@@ -1460,10 +1502,375 @@ function fitMapToSpots(spots) {
 
 
 /* ==========================================================================
- * 9. 啟動
+ * 9. 雲端同步（Firebase Firestore）
+ *
+ * 共享行程的網址是 #trip-<id>，拿到連結的人都能一起編輯。雲端資料：
+ *   trips/{tripId}                    行程本體：days、travelMode、legModes、members
+ *   trips/{tripId}/expenses/{id}      每筆花費一份文件，多人同時記帳不會互相覆蓋
+ *
+ * 寫入：saveState() → queueCloudSave() 等 0.4 秒沒有新變動再一次批次寫入，只寫有變的部分。
+ * 讀取：onSnapshot 即時收到別人的變動；正在打字時先不重繪，離開輸入框再更新畫面。
+ * 合併：行程本體是同一份文件，收到別人的版本時用 mergeTrip() 和本機尚未上傳的修改逐項合併，
+ *       只有兩人同時改到同一個景點／旅伴時，才以本機為準。
+ * ========================================================================== */
+
+const sync = {
+  db: null,
+  tripRef: null,
+  status: sharedTripId ? 'connecting' : 'local', // local | connecting | synced | saving | offline | error
+  message: '',
+  timer: null,
+  loaded: { trip: false, expenses: false }, // 兩邊都收到第一次資料後才開始上傳
+  lastTripJson: '',
+  baseTrip: null,            // 上次和雲端一致的行程本體，合併時用來判斷哪邊有修改
+  syncedExpenses: new Map(), // expenseId -> 雲端目前內容（stableStringify）
+  copiedTimer: null
+};
+
+function isSyncReady() {
+  return Boolean(sync.tripRef && sync.loaded.trip && sync.loaded.expenses);
+}
+
+// 物件 key 排序後再轉字串，避免 Firestore 回傳的欄位順序不同被誤判成有變動
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().filter(k => value[k] !== undefined)
+      .map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function pickTripData(source) {
+  return {
+    days: source.days,
+    travelMode: source.travelMode || TRAVEL_MODES[0].value,
+    legModes: source.legModes || {},
+    members: source.members
+  };
+}
+
+function pickExpense(x) {
+  return { id: x.id, ref: x.ref, title: x.title || '', amount: Number(x.amount) || 0, paidBy: x.paidBy, split: x.split };
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`無法載入 ${src}`));
+    document.head.append(script);
+  });
+}
+
+async function initFirebase() {
+  if (sync.db) return sync.db;
+  await loadScript(`${FIREBASE_SDK}/firebase-app-compat.js`);
+  await loadScript(`${FIREBASE_SDK}/firebase-firestore-compat.js`);
+  const app = firebase.initializeApp(FIREBASE_CONFIG);
+  sync.db = firebase.firestore(app);
+  sync.db.settings({ ignoreUndefinedProperties: true });
+  return sync.db;
+}
+
+function setSyncStatus(status, message = '') {
+  sync.status = status;
+  sync.message = message;
+  renderSyncBar();
+}
+
+// ---------- 寫入 ----------
+function queueCloudSave() {
+  if (!isSyncReady()) return;
+  clearTimeout(sync.timer);
+  sync.timer = setTimeout(flushCloudSave, 400);
+  if (sync.status !== 'offline') setSyncStatus('saving');
+}
+
+async function flushCloudSave() {
+  sync.timer = null;
+  const batch = sync.db.batch();
+  let writes = 0;
+
+  const trip = pickTripData(state);
+  const tripJson = stableStringify(trip);
+  if (tripJson !== sync.lastTripJson) {
+    batch.set(sync.tripRef, { ...trip, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    sync.lastTripJson = tripJson;
+    sync.baseTrip = JSON.parse(JSON.stringify(trip));
+    writes++;
+  }
+
+  const expensesRef = sync.tripRef.collection('expenses');
+  const current = new Map(state.expenses.map(x => [x.id, pickExpense(x)]));
+  current.forEach((expense, id) => {
+    const json = stableStringify(expense);
+    if (sync.syncedExpenses.get(id) === json) return;
+    batch.set(expensesRef.doc(id), expense);
+    sync.syncedExpenses.set(id, json);
+    writes++;
+  });
+  [...sync.syncedExpenses.keys()].forEach(id => {
+    if (current.has(id)) return;
+    batch.delete(expensesRef.doc(id));
+    sync.syncedExpenses.delete(id);
+    writes++;
+  });
+
+  if (!writes) {
+    if (sync.status === 'saving') setSyncStatus('synced');
+    return;
+  }
+  try {
+    await batch.commit(); // 離線時會等恢復連線、寫入雲端後才完成
+    if (!sync.timer && sync.status !== 'error') setSyncStatus('synced');
+  } catch (err) {
+    console.warn('Firestore write:', err);
+    setSyncStatus('error', '儲存到雲端失敗，請檢查 Firestore 安全規則或網路連線');
+  }
+}
+
+// ---------- 讀取 ----------
+async function joinSharedTrip() {
+  if (!FIREBASE_CONFIG) {
+    setSyncStatus('error', '這是共享行程連結，但網站還沒設定雲端同步（FIREBASE_CONFIG）');
+    return;
+  }
+  try {
+    await initFirebase();
+  } catch (err) {
+    setSyncStatus('error', '無法載入雲端同步元件，請檢查網路連線');
+    return;
+  }
+  sync.tripRef = sync.db.collection('trips').doc(sharedTripId);
+  sync.tripRef.onSnapshot(onTripSnapshot, onSyncError);
+  sync.tripRef.collection('expenses').onSnapshot(onExpensesSnapshot, onSyncError);
+}
+
+function onSyncError(err) {
+  console.warn('Firestore listen:', err);
+  setSyncStatus('error', err.code === 'permission-denied'
+    ? '沒有權限讀取這個行程，請檢查 Firestore 安全規則'
+    : '和雲端的連線中斷，請重新整理頁面');
+}
+
+function onTripSnapshot(doc) {
+  if (!doc.exists) {
+    setSyncStatus('error', '找不到這個共享行程，請確認連結是否完整');
+    return;
+  }
+  if (doc.metadata.hasPendingWrites) return; // 自己剛寫入的變動，畫面早就是最新的
+  const remote = pickTripData(doc.data());
+  if (!Array.isArray(remote.days) || !remote.days.length || !Array.isArray(remote.members)) return;
+  const remoteJson = stableStringify(remote);
+  // 第一次載入以雲端為準；之後和本機還沒上傳的修改合併
+  const next = sync.loaded.trip ? mergeTrip(sync.baseTrip, pickTripData(state), remote) : remote;
+  Object.assign(state, JSON.parse(JSON.stringify(next)));
+  normalizeState(state);
+  sync.baseTrip = JSON.parse(remoteJson);
+  sync.lastTripJson = remoteJson;
+  sync.loaded.trip = true;
+  if (stableStringify(pickTripData(state)) !== remoteJson) queueCloudSave(); // 本機有雲端還沒有的修改
+  applyRemoteChange();
+}
+
+// 三方合併：base 是上次和雲端一致的版本。每個景點、旅伴、路段設定各自比較，
+// 只有一邊改過就取那一邊；兩邊都改過以本機為準。清單順序也一樣，並保留另一邊新增或刪除的項目。
+function mergeTrip(base, local, remote) {
+  const same = (a, b) => stableStringify(a) === stableStringify(b);
+  const pick = (b, l, r) => (same(l, b) ? r : l);
+  const mergeIds = (b, l, r) => {
+    if (same(l, b)) return r.slice();
+    if (same(r, b)) return l.slice();
+    const inBase = new Set(b);
+    const inLocal = new Set(l);
+    const inRemote = new Set(r);
+    const out = l.filter(id => !(inBase.has(id) && !inRemote.has(id))); // 拿掉對方刪除的
+    r.forEach(id => { if (!inBase.has(id) && !inLocal.has(id)) out.push(id); }); // 加上對方新增的
+    return out;
+  };
+  const mergeMap = (b = {}, l = {}, r = {}) => {
+    const out = {};
+    new Set([...Object.keys(b), ...Object.keys(l), ...Object.keys(r)]).forEach(key => {
+      const value = pick(b[key], l[key], r[key]);
+      if (value !== undefined) out[key] = value;
+    });
+    return out;
+  };
+  const flatten = trip => {
+    const spots = {};
+    const lists = {};
+    trip.days.forEach(day => {
+      lists[day.id] = day.spots.map(s => s.id);
+      day.spots.forEach(s => { spots[s.id] = s; });
+    });
+    return { order: trip.days.map(d => d.id), lists, spots };
+  };
+  if (!base) return remote;
+  const B = flatten(base);
+  const L = flatten(local);
+  const R = flatten(remote);
+  const spots = mergeMap(B.spots, L.spots, R.spots);
+  const placed = new Set();
+  const days = mergeIds(B.order, L.order, R.order).map(id => ({
+    id,
+    spots: mergeIds(B.lists[id] || [], L.lists[id] || [], R.lists[id] || [])
+      .filter(spotId => spots[spotId] && !placed.has(spotId) && placed.add(spotId))
+      .map(spotId => spots[spotId])
+  }));
+  const byId = list => Object.fromEntries(list.map(m => [m.id, m]));
+  const members = mergeMap(byId(base.members), byId(local.members), byId(remote.members));
+  return {
+    days: days.length ? days : remote.days,
+    travelMode: pick(base.travelMode, local.travelMode, remote.travelMode),
+    legModes: mergeMap(base.legModes, local.legModes, remote.legModes),
+    members: mergeIds(base.members.map(m => m.id), local.members.map(m => m.id), remote.members.map(m => m.id))
+      .filter(id => members[id]).map(id => members[id])
+  };
+}
+
+function onExpensesSnapshot(snap) {
+  if (!sync.loaded.expenses) {
+    // 第一次：以雲端為準，取代快取裡可能過期的花費
+    state.expenses = snap.docs.map(d => pickExpense({ ...d.data(), id: d.id }));
+    sync.syncedExpenses = new Map(state.expenses.map(x => [x.id, stableStringify(x)]));
+    sync.loaded.expenses = true;
+    applyRemoteChange();
+    return;
+  }
+  let changed = false;
+  snap.docChanges().forEach(change => {
+    if (change.doc.metadata.hasPendingWrites) return;
+    const id = change.doc.id;
+    const local = state.expenses.find(x => x.id === id);
+    // 這筆正在本機編輯、還沒上傳，先不要被雲端的舊內容蓋掉
+    if (local && sync.timer && stableStringify(pickExpense(local)) !== sync.syncedExpenses.get(id)) return;
+    if (change.type === 'removed') {
+      state.expenses = state.expenses.filter(x => x.id !== id);
+      sync.syncedExpenses.delete(id);
+    } else {
+      const expense = pickExpense({ ...change.doc.data(), id });
+      if (local) Object.assign(local, expense);
+      else state.expenses.push(expense);
+      sync.syncedExpenses.set(id, stableStringify(expense));
+    }
+    changed = true;
+  });
+  if (changed) applyRemoteChange();
+}
+
+function applyRemoteChange() {
+  try {
+    localStorage.setItem(getStorageKey(), JSON.stringify(state));
+  } catch {}
+  if (isSyncReady() && sync.status === 'connecting') setSyncStatus(navigator.onLine ? 'synced' : 'offline');
+  // 正在打字時整個重繪會讓輸入框失去焦點：先只更新金額，離開輸入框後再重繪
+  const active = document.activeElement;
+  if (active?.matches('input, textarea') && active.closest('.sidebar')) {
+    ui.renderOnBlur = true;
+    refreshMoneyViews();
+  } else {
+    render();
+  }
+}
+
+document.addEventListener('focusout', () => {
+  if (!ui.renderOnBlur) return;
+  setTimeout(() => {
+    if (document.activeElement?.matches('input, textarea') && document.activeElement.closest('.sidebar')) return;
+    ui.renderOnBlur = false;
+    render();
+  }, 0);
+});
+
+window.addEventListener('offline', () => {
+  if (sharedTripId && sync.status !== 'error') setSyncStatus('offline');
+});
+window.addEventListener('online', () => {
+  if (sharedTripId && sync.status === 'offline') setSyncStatus(sync.timer ? 'saving' : 'synced');
+});
+
+// 換到另一個行程連結時重新載入
+window.addEventListener('hashchange', () => {
+  if (getTripIdFromHash() !== sharedTripId) location.reload();
+});
+
+// ---------- 建立 / 離開共享行程 ----------
+async function startSharing() {
+  if (!FIREBASE_CONFIG || sharedTripId) return;
+  setSyncStatus('connecting', '正在建立共享行程…');
+  try {
+    const db = await initFirebase();
+    const tripRef = db.collection('trips').doc();
+    const batch = db.batch();
+    const now = firebase.firestore.FieldValue.serverTimestamp();
+    batch.set(tripRef, { ...pickTripData(state), createdAt: now, updatedAt: now });
+    state.expenses.filter(x => x.amount > 0).forEach(x => batch.set(tripRef.collection('expenses').doc(x.id), pickExpense(x)));
+    await batch.commit();
+    // 目前的個人行程複製一份成為共享行程，個人行程保持原樣
+    localStorage.setItem(`${STATE_STORAGE}:trip-${tripRef.id}`, JSON.stringify(state));
+    location.hash = `trip-${tripRef.id}`;
+  } catch (err) {
+    console.warn('Firestore create:', err);
+    setSyncStatus('local');
+    alert('建立共享行程失敗，請確認 Firestore 已建立並設定好安全規則。');
+  }
+}
+
+function leaveSharedTrip() {
+  const ok = confirm('回到只存在這台裝置的個人行程？\n共享行程不會被刪除，之後用原本的連結就能再打開。');
+  if (!ok) return;
+  history.replaceState(null, '', location.pathname + location.search);
+  location.reload();
+}
+
+async function copyShareLink(btn) {
+  const url = location.href;
+  try {
+    await navigator.clipboard.writeText(url);
+    btn.textContent = '已複製';
+    clearTimeout(sync.copiedTimer);
+    sync.copiedTimer = setTimeout(renderSyncBar, 2000);
+  } catch {
+    prompt('複製這個連結，傳給一起旅行的人：', url);
+  }
+}
+
+function renderSyncBar() {
+  const el = document.getElementById('sync-bar');
+  if (!sharedTripId) {
+    el.className = 'sync-bar local';
+    el.innerHTML = FIREBASE_CONFIG
+      ? `<span class="sync-text">${sync.status === 'connecting' ? escapeHtml(sync.message) : '行程只存在這台裝置'}</span>
+         <button class="sync-btn primary" data-action="start-sharing" ${sync.status === 'connecting' ? 'disabled' : ''}>建立共享連結</button>`
+      : `<span class="sync-text">行程只存在這台裝置</span>
+         <a class="sync-btn" href="https://github.com/Lyn0U0/clock/blob/claude/amazing-hopper-a3rihm/trip-planner/README.md#雲端同步"
+           target="_blank" rel="noopener" title="管理者在 app.js 設定 Firebase 後即可共享">如何開啟雲端同步</a>`;
+    return;
+  }
+  const texts = {
+    connecting: '正在載入共享行程…',
+    synced: '已同步・拿到連結的人都能一起編輯',
+    saving: '儲存中…',
+    offline: '離線中，恢復連線後會自動同步',
+    error: sync.message
+  };
+  el.className = `sync-bar shared ${sync.status}`;
+  el.innerHTML = `
+    <span class="sync-dot" aria-hidden="true"></span>
+    <span class="sync-text" role="status">${escapeHtml(texts[sync.status] || '')}</span>
+    <button class="sync-btn primary" data-action="copy-link">複製連結</button>
+    <button class="sync-btn" data-action="leave-trip">離開</button>`;
+}
+
+
+/* ==========================================================================
+ * 10. 啟動
  * ========================================================================== */
 
 render();
+if (sharedTripId) joinSharedTrip();
 if (apiKey) {
   loadGoogleMaps(apiKey).then(initMap).catch(err => showSetup(err.message));
 } else {

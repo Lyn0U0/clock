@@ -472,7 +472,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .btn-primary:hover { filter: brightness(1.08); }
 
 @media (prefers-reduced-motion: reduce) {
-  .spot.flash { animation: none; }
+  .spot.flash, .sync-dot, .drawer { animation: none !important; }
 }
 
 /* 手機版：上下堆疊 */
@@ -727,3 +727,41 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .expenses { padding-left: 32px; }
   .leg-card .expenses { padding-left: 0; }
 }
+
+/* ---------- 雲端同步狀態 ---------- */
+.sync-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-size: 12px;
+  color: var(--muted);
+}
+.sync-bar.shared { background: color-mix(in srgb, #12a594 7%, var(--panel)); border-color: color-mix(in srgb, #12a594 30%, var(--border)); }
+.sync-bar.error { background: var(--danger-bg); border-color: color-mix(in srgb, var(--danger) 30%, var(--border)); color: var(--danger); }
+.sync-text { flex: 1; min-width: 0; line-height: 1.5; }
+.sync-dot { flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: #12a594; }
+.sync-bar.saving .sync-dot, .sync-bar.connecting .sync-dot { background: #f5a524; animation: pulse 1s ease-in-out infinite; }
+.sync-bar.offline .sync-dot { background: var(--muted); }
+.sync-bar.error .sync-dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .35; } }
+.sync-btn {
+  flex-shrink: 0;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 12px;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.sync-btn:hover:not(:disabled) { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.sync-btn.primary { border-color: var(--accent); background: var(--accent); color: #fff; }
+.sync-btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.sync-btn:disabled { opacity: .5; cursor: default; }
