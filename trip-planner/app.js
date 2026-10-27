@@ -14,6 +14,14 @@ const STATE_STORAGE = 'trip-planner-state-v2';
 const LEGACY_SPOTS_STORAGE = 'trip-planner-spots'; // 舊版（固定 5 天）的資料
 const DEFAULT_CENTER = { lat: 25.0375, lng: 121.5637 };
 const OVERVIEW = 'all'; // 「全部」分頁：上下捲動檢視所有天數
+const ROUTES_ENDPOINT = 'https://routes.googleapis.com/directions/v2:computeRoutes';
+// 交通方式：value 是 Routes API 的 travelMode，gmaps 是開啟 Google 地圖路線時用的參數
+const TRAVEL_MODES = [
+  { value: 'DRIVE', label: '開車', gmaps: 'driving' },
+  { value: 'TWO_WHEELER', label: '機車', gmaps: 'two-wheeler' },
+  { value: 'TRANSIT', label: '大眾運輸', gmaps: 'transit' },
+  { value: 'WALK', label: '步行', gmaps: 'walking' }
+];
 const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#0091ff', '#d6409f', '#7c8a2e'];
 
 
@@ -23,7 +31,8 @@ const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#009
  * 所有資料只存在 state 裡，清單、分頁、地圖圖釘都由它產生：
  *   state = {
  *     days: [{ id, spots: [Spot] }],  // 陣列順序就是 Day 1、Day 2…
- *     activeDayId: dayId | OVERVIEW
+ *     activeDayId: dayId | OVERVIEW,
+ *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK'
  *   }
  *   Spot = { id, name, lat, lng, placeId, note }  // spots 陣列順序就是當天的參觀順序
  *
@@ -128,6 +137,10 @@ function getVisibleDays() {
   return day ? [day] : state.days;
 }
 
+function getTravelMode() {
+  return TRAVEL_MODES.find(m => m.value === state.travelMode) || TRAVEL_MODES[0];
+}
+
 function countSpots() {
   return state.days.reduce((sum, d) => sum + d.spots.length, 0);
 }
@@ -164,6 +177,12 @@ function removeDay(dayId) {
 function setActiveDay(dayId) {
   if (dayId !== OVERVIEW && !getDay(dayId)) return;
   state.activeDayId = dayId;
+  commit();
+}
+
+function setTravelMode(mode) {
+  if (!TRAVEL_MODES.some(m => m.value === mode) || mode === getTravelMode().value) return;
+  state.travelMode = mode;
   commit();
 }
 
@@ -224,39 +243,132 @@ function toggleNoteEditor(spotId) {
 
 
 /* ==========================================================================
- * 5. 交通卡片（擴充預留：Routes API）
+ * 5. 交通時間（Routes API）
  *
- * 同一天相鄰兩個景點之間是一段「交通 Leg」，在清單中以 renderLegSlot() 佔位。
- * Leg 以「出發景點 → 抵達景點」的 id 組成 key，因此調整順序後會自然對應到新的組合。
- *
- * 之後串接 Routes API 的步驟：
- *   1. 在 fetchLegRoute() 呼叫 Routes API（computeRoutes），回傳 { mode, durationText, distanceText }。
- *   2. 在 refreshDayLegs() 把結果存入 legCache，完成後呼叫 render()。
- *   3. 如需在地圖畫路線，在 syncMarkers() 旁新增 syncRoutes()。
+ * 同一天相鄰兩個景點之間是一段「交通 Leg」，用 Routes API 的 computeRoutes 計算時間與距離。
+ * Leg 以「出發景點 → 抵達景點 + 交通方式」組成 key，調整順序或切換交通方式後
+ * 只會計算還沒算過的組合。結果回來時只更新該段交通欄位，不整個重繪，
+ * 避免打斷正在輸入的備註或拖曳。
  * ========================================================================== */
 
-const legCache = new Map(); // legKey -> { mode, durationText, distanceText }
+// legKey -> { status: 'loading' | 'ok' | 'error', durationSec, distanceMeters, message }
+const legCache = new Map();
 
-function getLegKey(fromSpot, toSpot) {
-  return `${fromSpot.id}->${toSpot.id}`;
+function getLegKey(fromSpot, toSpot, mode) {
+  return `${fromSpot.id}->${toSpot.id}@${mode}`;
 }
 
 function getDayLegs(day) {
   return day.spots.slice(1).map((toSpot, i) => ({ from: day.spots[i], to: toSpot }));
 }
 
-// 尚未實作：MVP 階段不計算交通
-async function fetchLegRoute(/* fromSpot, toSpot, mode */) {
-  return null;
+function toWaypoint(spot) {
+  return spot.placeId
+    ? { placeId: spot.placeId }
+    : { location: { latLng: { latitude: spot.lat, longitude: spot.lng } } };
 }
 
-async function refreshDayLegs(day) {
-  for (const { from, to } of getDayLegs(day)) {
-    const key = getLegKey(from, to);
-    if (legCache.has(key)) continue;
-    const leg = await fetchLegRoute(from, to);
-    if (leg) legCache.set(key, leg);
+async function fetchLegRoute(fromSpot, toSpot, mode) {
+  const body = {
+    origin: toWaypoint(fromSpot),
+    destination: toWaypoint(toSpot),
+    travelMode: mode,
+    languageCode: 'zh-TW',
+    units: 'METRIC'
+  };
+  // 開車、機車依即時路況計算；大眾運輸與步行不支援這個選項
+  if (mode === 'DRIVE' || mode === 'TWO_WHEELER') body.routingPreference = 'TRAFFIC_AWARE';
+
+  let res;
+  try {
+    res = await fetch(ROUTES_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': apiKey,
+        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters'
+      },
+      body: JSON.stringify(body)
+    });
+  } catch {
+    return { status: 'error', message: '連線失敗' };
   }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.error?.message || `HTTP ${res.status}`;
+    console.warn('Routes API:', detail);
+    const message = res.status === 403 ? '需在 Google Cloud 啟用 Routes API' : '無法計算交通時間';
+    return { status: 'error', message, detail };
+  }
+  const route = data.routes?.[0];
+  if (!route) return { status: 'error', message: '找不到這種交通方式的路線' };
+  return {
+    status: 'ok',
+    durationSec: parseInt(route.duration, 10) || 0,
+    distanceMeters: route.distanceMeters || 0
+  };
+}
+
+// 計算畫面上所有還沒算過的 Leg（每次 render 後呼叫）
+function refreshVisibleLegs() {
+  if (!apiKey) return;
+  const mode = getTravelMode().value;
+  getVisibleDays().forEach(day => {
+    getDayLegs(day).forEach(({ from, to }) => {
+      const key = getLegKey(from, to, mode);
+      if (legCache.has(key)) return;
+      legCache.set(key, { status: 'loading' });
+      fetchLegRoute(from, to, mode).then(result => {
+        legCache.set(key, result);
+        updateLegViews();
+      });
+    });
+  });
+}
+
+function retryLeg(fromId, toId) {
+  const from = findSpot(fromId)?.spot;
+  const to = findSpot(toId)?.spot;
+  if (!from || !to) return;
+  legCache.delete(getLegKey(from, to, getTravelMode().value));
+  refreshVisibleLegs();
+  updateLegViews();
+}
+
+// 一天的交通總時間；還有路段在計算或失敗時回傳 null
+function getDayTravelSec(day) {
+  const mode = getTravelMode().value;
+  let total = 0;
+  for (const { from, to } of getDayLegs(day)) {
+    const leg = legCache.get(getLegKey(from, to, mode));
+    if (leg?.status !== 'ok') return null;
+    total += leg.durationSec;
+  }
+  return total;
+}
+
+function formatDuration(sec) {
+  const min = Math.max(1, Math.round(sec / 60));
+  if (min < 60) return `${min} 分鐘`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m ? `${h} 小時 ${m} 分` : `${h} 小時`;
+}
+
+function formatDistance(meters) {
+  return meters < 1000 ? `${Math.round(meters)} 公尺` : `${(meters / 1000).toFixed(1)} 公里`;
+}
+
+function getGoogleMapsDirUrl(fromSpot, toSpot, mode) {
+  const params = new URLSearchParams({
+    api: '1',
+    origin: `${fromSpot.lat},${fromSpot.lng}`,
+    destination: `${toSpot.lat},${toSpot.lng}`,
+    travelmode: mode.gmaps
+  });
+  if (fromSpot.placeId) params.set('origin_place_id', fromSpot.placeId);
+  if (toSpot.placeId) params.set('destination_place_id', toSpot.placeId);
+  return `https://www.google.com/maps/dir/?${params}`;
 }
 
 
@@ -270,7 +382,11 @@ const ICONS = {
   note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
-  car: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M7.5 13h.01M16.5 13h.01"/></svg>'
+  DRIVE: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M7.5 13h.01M16.5 13h.01"/></svg>',
+  TWO_WHEELER: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3"/><circle cx="18.5" cy="16.5" r="3"/><path d="M8.5 16.5h5l3-7h-4M15 6h2.5l1 3.5M5.5 16.5 9 10h4"/></svg>',
+  TRANSIT: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 14h.01M15 14h.01M8 21l2-4M16 21l-2-4"/></svg>',
+  WALK: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="1.5"/><path d="M10 21l2-6 3 3v3M9 12l2-5 4 3 3 1M11 7l-3 2-1 3"/></svg>',
+  external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>'
 };
 
 function escapeHtml(str) {
@@ -279,10 +395,19 @@ function escapeHtml(str) {
 
 function render() {
   renderSummary();
+  renderModePicker();
   renderTabs();
   renderDayList();
   if (map) syncMarkers();
   flashPendingSpot();
+  refreshVisibleLegs();
+}
+
+function renderModePicker() {
+  const current = getTravelMode().value;
+  document.getElementById('mode-picker').innerHTML = TRAVEL_MODES.map(m => `
+      <button class="mode ${m.value === current ? 'active' : ''}" role="radio" aria-checked="${m.value === current}"
+        data-action="set-mode" data-mode="${m.value}">${ICONS[m.value]}${m.label}</button>`).join('');
 }
 
 function renderSummary() {
@@ -313,6 +438,7 @@ function renderDayList() {
           <span class="day-dot"></span>
           <h2 class="day-title">${label}</h2>
           <span class="day-count">${day.spots.length} 個景點</span>
+          <span class="day-travel" data-day-id="${day.id}">${renderDayTravel(day)}</span>
           <button class="btn-text danger" data-action="remove-day" data-day-id="${day.id}"
             ${canRemoveDay ? '' : 'disabled title="至少要保留一天"'}>刪除此天</button>
         </header>
@@ -363,14 +489,42 @@ function renderSpotCard(spot, index, total) {
     </li>`;
 }
 
-// 兩個景點之間的交通佔位；接上 Routes API 後會顯示 legCache 裡的結果
+function renderDayTravel(day) {
+  const sec = day.spots.length > 1 ? getDayTravelSec(day) : null;
+  return sec === null ? '' : `・交通 ${formatDuration(sec)}`;
+}
+
+// 兩個景點之間的交通欄位
 function renderLegSlot(fromSpot, toSpot) {
-  const leg = legCache.get(getLegKey(fromSpot, toSpot));
-  const text = leg ? `${escapeHtml(leg.durationText)}・${escapeHtml(leg.distanceText)}` : '交通資訊（即將推出）';
-  return `
-    <li class="leg" data-from="${fromSpot.id}" data-to="${toSpot.id}" aria-hidden="${leg ? 'false' : 'true'}">
-      <span class="leg-icon">${ICONS.car}</span><span class="leg-text">${text}</span>
-    </li>`;
+  return `<li class="leg" data-from="${fromSpot.id}" data-to="${toSpot.id}">${renderLegContent(fromSpot, toSpot)}</li>`;
+}
+
+function renderLegContent(fromSpot, toSpot) {
+  const mode = getTravelMode();
+  const icon = `<span class="leg-icon">${ICONS[mode.value]}</span>`;
+  if (!apiKey) return `${icon}<span class="leg-text">設定 Google Maps 金鑰後顯示交通時間</span>`;
+  const leg = legCache.get(getLegKey(fromSpot, toSpot, mode.value));
+  if (!leg || leg.status === 'loading') return `${icon}<span class="leg-text">計算${mode.label}時間…</span>`;
+  if (leg.status === 'error') {
+    return `${icon}<span class="leg-text error" title="${escapeHtml(leg.detail || '')}">${escapeHtml(leg.message)}</span>
+      <button class="leg-link" data-action="retry-leg">重試</button>`;
+  }
+  return `${icon}<span class="leg-text"><strong>${formatDuration(leg.durationSec)}</strong>・${formatDistance(leg.distanceMeters)}</span>
+    <a class="leg-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener"
+      title="在 Google 地圖查看路線">路線${ICONS.external}</a>`;
+}
+
+// 只更新交通欄位與每天的交通總時間，不動景點卡片
+function updateLegViews() {
+  dayListEl.querySelectorAll('.leg').forEach(el => {
+    const from = findSpot(el.dataset.from)?.spot;
+    const to = findSpot(el.dataset.to)?.spot;
+    if (from && to) el.innerHTML = renderLegContent(from, to);
+  });
+  dayListEl.querySelectorAll('.day-travel').forEach(el => {
+    const day = getDay(el.dataset.dayId);
+    if (day) el.textContent = renderDayTravel(day);
+  });
 }
 
 function flashPendingSpot() {
@@ -411,6 +565,12 @@ document.querySelector('.sidebar').addEventListener('click', e => {
     case 'toggle-note': toggleNoteEditor(spotId); break;
     case 'remove-spot': removeSpot(spotId); break;
     case 'focus-spot': focusSpotOnMap(spotId); break;
+    case 'set-mode': setTravelMode(btn.dataset.mode); break;
+    case 'retry-leg': {
+      const leg = btn.closest('.leg');
+      retryLeg(leg.dataset.from, leg.dataset.to);
+      break;
+    }
   }
 });
 
@@ -488,6 +648,7 @@ function endDrag() {
  * ========================================================================== */
 
 let map, infoWindow, AdvancedMarkerElement, Place;
+const apiKey = getApiKey();
 const markers = new Map(); // spotId -> AdvancedMarkerElement
 
 function getApiKey() {
@@ -702,7 +863,6 @@ function fitMapToSpots(spots) {
  * ========================================================================== */
 
 render();
-const apiKey = getApiKey();
 if (apiKey) {
   loadGoogleMaps(apiKey).then(initMap).catch(err => showSetup(err.message));
 } else {
