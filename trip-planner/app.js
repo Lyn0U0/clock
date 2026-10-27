@@ -11,7 +11,14 @@ const GOOGLE_MAP_ID = 'DEMO_MAP_ID';
 
 // 雲端同步（Firebase Firestore）：到 Firebase 主控台 → 專案設定 → 一般 → 你的應用程式，
 // 複製 firebaseConfig 物件貼在這裡（設定步驟見 README.md）。保持 null 則只存在這台裝置。
-const FIREBASE_CONFIG = null;
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBMr9FNlmaQ7D_lhYg_8RvQxBxrGSJxaic',
+  authDomain: 'trip-planner-1096b.firebaseapp.com',
+  projectId: 'trip-planner-1096b',
+  storageBucket: 'trip-planner-1096b.firebasestorage.app',
+  messagingSenderId: '324731243248',
+  appId: '1:324731243248:web:d19ebc281226de45c39035'
+};
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 
 const KEY_STORAGE = 'trip-planner-gmaps-key';
