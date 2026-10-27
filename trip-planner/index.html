@@ -38,20 +38,28 @@
         role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" aria-label="搜尋地點">
       <ul class="search-results" id="search-results" role="listbox" hidden></ul>
     </div>
-    <div class="setup" id="setup" hidden>
+    <button class="key-btn" id="key-btn" type="button" title="查看或更換 Google Maps 金鑰">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
+      地圖金鑰
+    </button>
+    <div class="setup" id="setup" role="dialog" aria-labelledby="setup-title" hidden>
       <div class="setup-card">
-        <h2>設定 Google Maps 金鑰</h2>
+        <h2 id="setup-title">設定 Google Maps 金鑰</h2>
         <p class="setup-error" id="setup-error" hidden></p>
         <ol>
           <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
           <li>啟用 <strong>Maps JavaScript API</strong> 與 <strong>Routes API</strong>（交通時間）；搜尋地點、點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>。</li>
           <li>在金鑰的「應用程式限制」選「網站」，加入 <code>lyn0u0.github.io/*</code>。</li>
         </ol>
-        <p>正式使用時，把金鑰填進 <code>app.js</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。想先試用，可直接貼在下方，只會存在這台瀏覽器。</p>
+        <p>金鑰只會存在這台瀏覽器。要讓所有人打開就能用，請把金鑰填進 <code>app.js</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。</p>
         <form class="setup-form" id="setup-form">
           <input id="setup-key" type="text" placeholder="貼上 API 金鑰（AIza…）" autocomplete="off" spellcheck="false">
           <button type="submit" class="btn-primary">使用金鑰</button>
         </form>
+        <div class="setup-actions">
+          <button type="button" class="btn-text danger" id="setup-clear" hidden>清除這台瀏覽器的金鑰</button>
+          <button type="button" class="btn-text" id="setup-cancel" hidden>取消，回到地圖</button>
+        </div>
       </div>
     </div>
   </main>

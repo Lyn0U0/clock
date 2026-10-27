@@ -1198,8 +1198,8 @@ let map, infoWindow, AdvancedMarkerElement, Place, AutocompleteSuggestion, Autoc
 const apiKey = getApiKey();
 const markers = new Map(); // spotId -> AdvancedMarkerElement
 
-function getApiKey() {
-  if (GOOGLE_MAPS_API_KEY) return GOOGLE_MAPS_API_KEY;
+// 這台瀏覽器填過的金鑰優先，方便自行更換；沒填過才用程式碼裡的 GOOGLE_MAPS_API_KEY
+function getStoredApiKey() {
   try {
     return localStorage.getItem(KEY_STORAGE) || '';
   } catch {
@@ -1207,31 +1207,66 @@ function getApiKey() {
   }
 }
 
-function showSetup(error) {
+function getApiKey() {
+  return getStoredApiKey() || GOOGLE_MAPS_API_KEY;
+}
+
+// cancelable：地圖已正常載入、只是想查看或更換金鑰時，可以取消回到地圖
+function showSetup(error, { cancelable = false } = {}) {
   document.getElementById('setup').hidden = false;
   const el = document.getElementById('setup-error');
   el.hidden = !error;
   el.textContent = error || '';
+  const input = document.getElementById('setup-key');
+  input.value = getApiKey();
+  document.getElementById('setup-clear').hidden = !getStoredApiKey();
+  document.getElementById('setup-cancel').hidden = !cancelable;
+  input.focus();
+  input.select();
 }
+
+function hideSetup() {
+  document.getElementById('setup').hidden = true;
+}
+
+document.getElementById('key-btn').addEventListener('click', () => {
+  showSetup('', { cancelable: Boolean(map) });
+});
+
+document.getElementById('setup-cancel').addEventListener('click', hideSetup);
+
+document.getElementById('setup').addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('setup-cancel').hidden) hideSetup();
+});
+
+document.getElementById('setup-clear').addEventListener('click', () => {
+  if (!confirm('清除這台瀏覽器儲存的 Google Maps 金鑰？清除後需要重新填寫。')) return;
+  try {
+    localStorage.removeItem(KEY_STORAGE);
+  } catch {}
+  location.reload();
+});
 
 document.getElementById('setup-form').addEventListener('submit', e => {
   e.preventDefault();
   const key = document.getElementById('setup-key').value.trim();
   if (!key) return;
+  if (key === getApiKey() && map) {
+    hideSetup(); // 沒有改金鑰
+    return;
+  }
   try {
     localStorage.setItem(KEY_STORAGE, key);
   } catch {
-    // 無法儲存時（例如無痕模式）只能改用程式碼裡的 GOOGLE_MAPS_API_KEY
+    alert('這個瀏覽器無法儲存金鑰（可能是無痕模式），請把金鑰填進 app.js 的 GOOGLE_MAPS_API_KEY。');
+    return;
   }
-  location.reload();
+  location.reload(); // Google Maps 載入後無法更換金鑰，需重新載入頁面
 });
 
-// 金鑰無效或網站未授權時，Google 會呼叫這個函式
+// 金鑰無效或網站未授權時，Google 會呼叫這個函式；保留金鑰讓使用者直接修正
 window.gm_authFailure = () => {
-  try {
-    localStorage.removeItem(KEY_STORAGE);
-  } catch {}
-  showSetup('金鑰無法使用：請確認金鑰正確、已啟用 Maps JavaScript API，且已允許此網站。');
+  showSetup('這把金鑰無法使用：請確認金鑰沒有打錯、已啟用 Maps JavaScript API，且「網站限制」允許此網址。');
 };
 
 function loadGoogleMaps(key) {
