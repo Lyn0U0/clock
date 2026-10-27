@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>旅遊行程規劃</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
   <style>
@@ -178,7 +177,51 @@
       white-space: nowrap;
     }
 
-    /* 圖釘 */
+    /* 尚未設定金鑰 / 金鑰錯誤時的提示 */
+    .setup {
+      position: absolute;
+      inset: 0;
+      z-index: 600;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: var(--bg);
+    }
+    .setup[hidden] { display: none; }
+    .setup-card {
+      width: 100%;
+      max-width: 440px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: 0 10px 30px rgba(20, 24, 40, .08);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .setup-card h2 { margin: 0; font-size: 18px; }
+    .setup-card p, .setup-card ol { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+    .setup-card ol { padding-left: 20px; }
+    .setup-card a { color: var(--accent); }
+    .setup-card code { background: #eef0f5; padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+    .setup-error { color: var(--danger) !important; font-weight: 500; }
+    .setup-form { display: flex; gap: 8px; }
+    .setup-form input {
+      flex: 1;
+      min-width: 0;
+      font: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      outline: none;
+    }
+    .setup-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79, 110, 247, .15); }
+    .setup-form .btn-primary { margin: 0; padding: 8px 14px; }
+
+    /* 圖釘：尖端對齊座標點 */
+    .pin-wrap { width: 30px; height: 36px; display: flex; justify-content: center; cursor: pointer; }
     .pin {
       width: 30px; height: 30px;
       border-radius: 50% 50% 50% 0;
@@ -198,9 +241,7 @@
     }
 
     /* 彈出表單 */
-    .leaflet-popup-content-wrapper { border-radius: var(--radius); box-shadow: 0 10px 30px rgba(20, 24, 40, .18); }
-    .leaflet-popup-content { margin: 16px; width: 240px !important; }
-    .add-form { display: flex; flex-direction: column; gap: 10px; font-family: "Noto Sans TC", system-ui, sans-serif; }
+    .add-form { width: 240px; padding: 4px 2px 2px; display: flex; flex-direction: column; gap: 10px; font-family: "Noto Sans TC", system-ui, sans-serif; }
     .add-form h3 { margin: 0; font-size: 15px; }
     .add-form .coord { margin: -6px 0 2px; font-size: 11px; color: var(--muted); }
     .add-form label { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
@@ -258,16 +299,38 @@
   <main class="map-wrap">
     <div id="map"></div>
     <div class="map-hint">點擊地圖新增景點</div>
+    <div class="setup" id="setup" hidden>
+      <div class="setup-card">
+        <h2>設定 Google Maps 金鑰</h2>
+        <p class="setup-error" id="setup-error" hidden></p>
+        <ol>
+          <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
+          <li>啟用 <strong>Maps JavaScript API</strong>（點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>）。</li>
+          <li>在金鑰的「應用程式限制」選「網站」，加入 <code>lyn0u0.github.io/*</code>。</li>
+        </ol>
+        <p>正式使用時，把金鑰填進 <code>index.html</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。想先試用，可直接貼在下方，只會存在這台瀏覽器。</p>
+        <form class="setup-form" id="setup-form">
+          <input id="setup-key" type="text" placeholder="貼上 API 金鑰（AIza…）" autocomplete="off" spellcheck="false">
+          <button type="submit" class="btn-primary">使用金鑰</button>
+        </form>
+      </div>
+    </div>
   </main>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script>
+    // ---------- Google Maps 設定 ----------
+    // 填入你的 Google Maps API 金鑰（請在 Google Cloud 限制可使用的網站）
+    const GOOGLE_MAPS_API_KEY = '';
+    // Advanced Marker 需要 Map ID；DEMO_MAP_ID 可用於開發，正式上線請換成自己的 Map ID
+    const GOOGLE_MAP_ID = 'DEMO_MAP_ID';
+    const KEY_STORAGE = 'trip-planner-gmaps-key';
+
     const DAYS = [1, 2, 3, 4, 5];
     const STORAGE_KEY = 'trip-planner-spots';
 
     // 單一資料來源：所有景點都存在這裡，清單與圖釘都由它產生
     let spots = loadSpots();
-    const markers = new Map(); // spot.id -> L.marker
+    const markers = new Map(); // spot.id -> AdvancedMarkerElement
 
     function loadSpots() {
       try {
@@ -295,16 +358,98 @@
     }
 
     // ---------- 地圖 ----------
-    const map = L.map('map', { zoomControl: false }).setView([25.0375, 121.5637], 13);
-    L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    }).addTo(map);
+    let map, infoWindow, AdvancedMarkerElement, Place;
 
-    // 點擊地圖 → 在點擊處彈出新增表單
-    map.on('click', e => {
-      const { lat, lng } = e.latlng;
+    function getApiKey() {
+      if (GOOGLE_MAPS_API_KEY) return GOOGLE_MAPS_API_KEY;
+      try {
+        return localStorage.getItem(KEY_STORAGE) || '';
+      } catch {
+        return '';
+      }
+    }
+
+    function showSetup(error) {
+      document.getElementById('setup').hidden = false;
+      const el = document.getElementById('setup-error');
+      el.hidden = !error;
+      el.textContent = error || '';
+    }
+
+    document.getElementById('setup-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const key = document.getElementById('setup-key').value.trim();
+      if (!key) return;
+      try {
+        localStorage.setItem(KEY_STORAGE, key);
+      } catch {
+        // 無法儲存時（例如無痕模式）只能改用程式碼裡的 GOOGLE_MAPS_API_KEY
+      }
+      location.reload();
+    });
+
+    // 金鑰無效或網站未授權時，Google 會呼叫這個函式
+    window.gm_authFailure = () => {
+      try {
+        localStorage.removeItem(KEY_STORAGE);
+      } catch {}
+      showSetup('金鑰無法使用：請確認金鑰正確、已啟用 Maps JavaScript API，且已允許此網站。');
+    };
+
+    function loadGoogleMaps(key) {
+      return new Promise((resolve, reject) => {
+        window.__initGoogleMaps = resolve;
+        const script = document.createElement('script');
+        const params = new URLSearchParams({ key, v: 'weekly', loading: 'async', language: 'zh-TW', callback: '__initGoogleMaps' });
+        script.src = `https://maps.googleapis.com/maps/api/js?${params}`;
+        script.async = true;
+        script.onerror = () => reject(new Error('Google Maps 無法載入'));
+        document.head.append(script);
+      });
+    }
+
+    async function initMap() {
+      const { Map, InfoWindow } = await google.maps.importLibrary('maps');
+      ({ AdvancedMarkerElement } = await google.maps.importLibrary('marker'));
+      try {
+        ({ Place } = await google.maps.importLibrary('places'));
+      } catch {
+        Place = null; // 沒有 Places API 也能正常打點，只是不會自動帶入名稱
+      }
+
+      map = new Map(document.getElementById('map'), {
+        center: { lat: 25.0375, lng: 121.5637 },
+        zoom: 13,
+        mapId: GOOGLE_MAP_ID,
+        clickableIcons: true,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: false,
+        gestureHandling: 'greedy'
+      });
+      infoWindow = new InfoWindow();
+
+      // 點擊地圖 → 在點擊處彈出新增表單
+      map.addListener('click', e => {
+        if (!e.latLng) return;
+        if (e.placeId) {
+          e.stop(); // 點到店家/景點時，改用我們的表單取代 Google 預設資訊框
+        }
+        openAddForm(e.latLng, e.placeId);
+      });
+
+      render();
+      if (spots.length) {
+        const bounds = new google.maps.LatLngBounds();
+        spots.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
+        map.fitBounds(bounds, 60);
+        if (spots.length === 1) map.setZoom(15);
+      }
+    }
+
+    function openAddForm(latLng, placeId) {
+      const lat = latLng.lat();
+      const lng = latLng.lng();
       const form = document.createElement('form');
       form.className = 'add-form';
       form.innerHTML = `
@@ -320,30 +465,39 @@
         </label>
         <button type="submit" class="btn-primary">加入行程</button>
       `;
+      const input = form.elements.name;
       form.addEventListener('submit', ev => {
         ev.preventDefault();
-        const input = form.elements.name;
         const name = input.value.trim();
         if (!name) {
           input.classList.add('invalid');
           input.focus();
           return;
         }
-        addSpot({ name, day: Number(form.elements.day.value), lat, lng });
-        map.closePopup();
+        addSpot({ name, day: Number(form.elements.day.value), lat, lng, placeId: placeId || null });
+        infoWindow.close();
       });
-      form.elements.name.addEventListener('input', ev => ev.target.classList.remove('invalid'));
+      input.addEventListener('input', () => input.classList.remove('invalid'));
 
-      L.popup({ closeButton: true, autoPanPadding: [40, 40] })
-        .setLatLng(e.latlng)
-        .setContent(form)
-        .openOn(map);
-      setTimeout(() => form.elements.name.focus(), 50);
-    });
+      infoWindow.setContent(form);
+      infoWindow.setPosition(latLng);
+      infoWindow.open({ map });
+      google.maps.event.addListenerOnce(infoWindow, 'domready', () => input.focus());
+
+      // 點到 Google 地圖上的地點時，自動帶入地點名稱
+      if (placeId && Place) {
+        new Place({ id: placeId, requestedLanguage: 'zh-TW' })
+          .fetchFields({ fields: ['displayName'] })
+          .then(({ place }) => {
+            if (!input.value && place.displayName) input.value = place.displayName;
+          })
+          .catch(() => {});
+      }
+    }
 
     // ---------- 資料操作 ----------
-    function addSpot({ name, day, lat, lng }) {
-      const spot = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, day, lat, lng };
+    function addSpot({ name, day, lat, lng, placeId }) {
+      const spot = { id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6), name, day, lat, lng, placeId };
       spots.push(spot);
       saveSpots();
       render();
@@ -360,7 +514,7 @@
     // 每次資料變動都重新產生清單，並讓地圖圖釘與資料保持一致
     function render() {
       renderSidebar();
-      syncMarkers();
+      if (map) syncMarkers();
       document.getElementById('total').textContent = spots.length;
     }
 
@@ -395,14 +549,11 @@
       }).join('');
     }
 
-    function makeIcon(spot, index) {
-      return L.divIcon({
-        className: '',
-        html: `<div class="pin" style="--c:${dayColor(spot.day)}"><span>${spot.day}-${index}</span></div>`,
-        iconSize: [30, 30],
-        iconAnchor: [15, 34],
-        popupAnchor: [0, -32]
-      });
+    function makePin(spot, index) {
+      const wrap = document.createElement('div');
+      wrap.className = 'pin-wrap';
+      wrap.innerHTML = `<div class="pin" style="--c:${dayColor(spot.day)}"><span>${spot.day}-${index}</span></div>`;
+      return wrap;
     }
 
     function syncMarkers() {
@@ -410,24 +561,21 @@
       // 移除已刪除景點的圖釘
       for (const [id, marker] of markers) {
         if (!ids.has(id)) {
-          map.removeLayer(marker);
+          marker.map = null;
           markers.delete(id);
         }
       }
       // 新增或更新其餘圖釘（序號可能因刪除而改變）
       DAYS.forEach(day => {
         spotsOfDay(day).forEach((spot, i) => {
-          const icon = makeIcon(spot, i + 1);
           let marker = markers.get(spot.id);
           if (!marker) {
-            marker = L.marker([spot.lat, spot.lng], { icon })
-              .addTo(map)
-              .on('click', () => highlight(spot.id));
+            marker = new AdvancedMarkerElement({ map, position: { lat: spot.lat, lng: spot.lng } });
+            marker.addListener('gmp-click', () => highlight(spot.id));
             markers.set(spot.id, marker);
-          } else {
-            marker.setIcon(icon);
           }
-          marker.bindTooltip(`Day ${spot.day}・${escapeHtml(spot.name)}`, { direction: 'top', offset: [0, -30] });
+          marker.content = makePin(spot, i + 1);
+          marker.title = `Day ${spot.day}・${spot.name}`;
         });
       });
     }
@@ -450,15 +598,18 @@
       }
       const id = e.target.closest('.spot')?.dataset.id;
       const spot = id && spots.find(s => s.id === id);
-      if (spot) {
-        map.flyTo([spot.lat, spot.lng], Math.max(map.getZoom(), 15), { duration: 0.6 });
-        markers.get(id)?.openTooltip();
+      if (spot && map) {
+        map.panTo({ lat: spot.lat, lng: spot.lng });
+        if (map.getZoom() < 15) map.setZoom(15);
       }
     });
 
     render();
-    if (spots.length) {
-      map.fitBounds(L.latLngBounds(spots.map(s => [s.lat, s.lng])), { padding: [60, 60], maxZoom: 15 });
+    const apiKey = getApiKey();
+    if (apiKey) {
+      loadGoogleMaps(apiKey).then(initMap).catch(err => showSetup(err.message));
+    } else {
+      showSetup();
     }
   </script>
 </body>
