@@ -501,6 +501,29 @@ function toWaypoint(spot) {
     : { location: { latLng: { latitude: spot.lat, longitude: spot.lng } } };
 }
 
+// 把 Google API 的錯誤轉成看得懂、知道怎麼修的說明（Routes API 與 Places API 共用）
+function explainGoogleApiError(apiName, text) {
+  if (/SERVICE_DISABLED|has not been used|is disabled/i.test(text)) {
+    return `這把金鑰所屬的 Google Cloud 專案還沒啟用 ${apiName}`;
+  }
+  if (/REFERER|REFERRER/i.test(text)) {
+    return `金鑰的「網站限制」不允許這個網址，請加入 ${location.host}/*`;
+  }
+  if (/API_KEY_SERVICE_BLOCKED|are blocked/i.test(text)) {
+    return `金鑰的「API 限制」沒有勾選 ${apiName}`;
+  }
+  if (/BILLING/i.test(text)) {
+    return 'Google Cloud 專案還沒啟用帳單（Maps 平台必須綁定帳單）';
+  }
+  if (/API_KEY_INVALID|API key not valid|API_KEY_EXPIRED/i.test(text)) {
+    return 'API 金鑰無效或已過期，請重新確認金鑰';
+  }
+  if (/RESOURCE_EXHAUSTED|quota/i.test(text)) {
+    return `${apiName} 已超過用量上限，請稍後再試`;
+  }
+  return `${apiName} 呼叫失敗：${text.trim().slice(0, 120)}`;
+}
+
 async function fetchLegRoute(fromSpot, toSpot, mode) {
   const body = {
     origin: toWaypoint(fromSpot),
@@ -528,10 +551,10 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    const reason = data.error?.details?.find(d => d.reason)?.reason || '';
     const detail = data.error?.message || `HTTP ${res.status}`;
-    console.warn('Routes API:', detail);
-    const message = res.status === 403 ? '需在 Google Cloud 啟用 Routes API' : '無法計算交通時間';
-    return { status: 'error', message, detail };
+    console.warn('Routes API:', res.status, reason, detail);
+    return { status: 'error', message: explainGoogleApiError('Routes API', `${reason} ${detail}`), detail };
   }
   const route = data.routes?.[0];
   if (!route) return { status: 'error', message: '找不到這種交通方式的路線' };
@@ -1369,7 +1392,7 @@ async function runPlaceSearch() {
     if (seq !== search.seq) return;
     console.warn('Places autocomplete:', err);
     search.items = [];
-    renderSearchResults('搜尋失敗：請確認已啟用 Places API (New)');
+    renderSearchResults(`搜尋失敗：${explainGoogleApiError('Places API (New)', String(err?.message || err))}`);
   }
 }
 
@@ -1424,7 +1447,7 @@ async function selectSuggestion(index) {
     await place.fetchFields({ fields: ['displayName', 'location', 'viewport'] });
   } catch (err) {
     console.warn('Places fetchFields:', err);
-    renderSearchResults('無法取得這個地點的資訊，請再試一次');
+    renderSearchResults(`無法取得地點資訊：${explainGoogleApiError('Places API (New)', String(err?.message || err))}`);
     return;
   }
   if (!place.location) return;
