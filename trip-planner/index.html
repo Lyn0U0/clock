@@ -25,14 +25,19 @@
 
   <main class="map-wrap">
     <div id="map"></div>
-    <div class="map-hint">點擊地圖新增景點</div>
+    <div class="search" role="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input id="place-search" type="search" placeholder="搜尋地點，或直接點擊地圖" autocomplete="off" disabled
+        role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" aria-label="搜尋地點">
+      <ul class="search-results" id="search-results" role="listbox" hidden></ul>
+    </div>
     <div class="setup" id="setup" hidden>
       <div class="setup-card">
         <h2>設定 Google Maps 金鑰</h2>
         <p class="setup-error" id="setup-error" hidden></p>
         <ol>
           <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
-          <li>啟用 <strong>Maps JavaScript API</strong> 與 <strong>Routes API</strong>（交通時間）；點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>。</li>
+          <li>啟用 <strong>Maps JavaScript API</strong> 與 <strong>Routes API</strong>（交通時間）；搜尋地點、點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>。</li>
           <li>在金鑰的「應用程式限制」選「網站」，加入 <code>lyn0u0.github.io/*</code>。</li>
         </ol>
         <p>正式使用時，把金鑰填進 <code>app.js</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。想先試用，可直接貼在下方，只會存在這台瀏覽器。</p>

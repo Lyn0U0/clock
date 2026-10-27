@@ -701,7 +701,7 @@ function endDrag() {
  * 8. 地圖（Google Maps）
  * ========================================================================== */
 
-let map, infoWindow, AdvancedMarkerElement, Place;
+let map, infoWindow, AdvancedMarkerElement, Place, AutocompleteSuggestion, AutocompleteSessionToken;
 const apiKey = getApiKey();
 const markers = new Map(); // spotId -> AdvancedMarkerElement
 
@@ -757,9 +757,9 @@ async function initMap() {
   const { Map: GoogleMap, InfoWindow } = await google.maps.importLibrary('maps');
   ({ AdvancedMarkerElement } = await google.maps.importLibrary('marker'));
   try {
-    ({ Place } = await google.maps.importLibrary('places'));
+    ({ Place, AutocompleteSuggestion, AutocompleteSessionToken } = await google.maps.importLibrary('places'));
   } catch {
-    Place = null; // 沒有 Places API 也能正常打點，只是不會自動帶入名稱
+    Place = null; // 沒有 Places API 也能正常打點，只是不能搜尋、不會自動帶入名稱
   }
 
   map = new GoogleMap(document.getElementById('map'), {
@@ -781,6 +781,7 @@ async function initMap() {
     openAddSpotForm(e.latLng, e.placeId);
   });
 
+  setupPlaceSearch();
   render();
   fitMapToSpots(getVisibleDays().flatMap(d => d.spots));
 }
@@ -792,7 +793,8 @@ function getDefaultDayId() {
   return state.days[0].id;
 }
 
-function openAddSpotForm(latLng, placeId) {
+// name：已知地點名稱時（例如從搜尋選取）直接帶入
+function openAddSpotForm(latLng, placeId, name) {
   const lat = latLng.lat();
   const lng = latLng.lng();
   const defaultDayId = getDefaultDayId();
@@ -829,9 +831,10 @@ function openAddSpotForm(latLng, placeId) {
   infoWindow.setPosition(latLng);
   infoWindow.open({ map });
   google.maps.event.addListenerOnce(infoWindow, 'domready', () => input.focus());
+  if (name) input.value = name;
 
   // 點到 Google 地圖上的地點時，自動帶入地點名稱
-  if (placeId && Place) {
+  if (placeId && Place && !name) {
     new Place({ id: placeId, requestedLanguage: 'zh-TW' })
       .fetchFields({ fields: ['displayName'] })
       .then(({ place }) => {
@@ -839,6 +842,129 @@ function openAddSpotForm(latLng, placeId) {
       })
       .catch(() => {});
   }
+}
+
+/* ---------- 搜尋地點（Places API (New) Autocomplete） ----------
+ * 輸入時列出建議地點；選取後地圖移到該處，並打開已填好名稱的新增表單。
+ * 同一次搜尋（打字到選取）共用一個 session token，Google 會合併計費。
+ */
+const searchInput = document.getElementById('place-search');
+const searchResults = document.getElementById('search-results');
+const search = { token: null, timer: null, seq: 0, items: [], active: -1 };
+
+function setupPlaceSearch() {
+  if (!AutocompleteSuggestion) {
+    searchInput.placeholder = '搜尋需啟用 Places API (New)，仍可直接點擊地圖';
+    return;
+  }
+  searchInput.disabled = false;
+  searchInput.addEventListener('input', () => {
+    clearTimeout(search.timer);
+    search.timer = setTimeout(runPlaceSearch, 250);
+  });
+  searchInput.addEventListener('keydown', onSearchKeydown);
+  searchInput.addEventListener('focus', () => {
+    if (search.items.length) showSearchResults();
+  });
+  searchInput.addEventListener('blur', hideSearchResults);
+  // 點選建議時不要讓輸入框先失焦（失焦會關閉清單）
+  searchResults.addEventListener('pointerdown', e => e.preventDefault());
+  searchResults.addEventListener('click', e => {
+    const item = e.target.closest('[data-index]');
+    if (item) selectSuggestion(Number(item.dataset.index));
+  });
+}
+
+async function runPlaceSearch() {
+  const text = searchInput.value.trim();
+  const seq = ++search.seq; // 只採用最後一次輸入的結果
+  if (!text) {
+    search.items = [];
+    hideSearchResults();
+    return;
+  }
+  search.token = search.token || new AutocompleteSessionToken();
+  try {
+    const { suggestions } = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      input: text,
+      sessionToken: search.token,
+      locationBias: map.getBounds() || map.getCenter(), // 優先顯示目前地圖範圍附近的地點
+      language: 'zh-TW'
+    });
+    if (seq !== search.seq) return;
+    search.items = suggestions.map(s => s.placePrediction).filter(Boolean);
+    search.active = search.items.length ? 0 : -1;
+    renderSearchResults(search.items.length ? '' : '找不到符合的地點');
+  } catch (err) {
+    if (seq !== search.seq) return;
+    console.warn('Places autocomplete:', err);
+    search.items = [];
+    renderSearchResults('搜尋失敗：請確認已啟用 Places API (New)');
+  }
+}
+
+function renderSearchResults(message) {
+  searchResults.innerHTML = message
+    ? `<li class="search-empty">${escapeHtml(message)}</li>`
+    : search.items.map((p, i) => `
+        <li class="search-item ${i === search.active ? 'active' : ''}" id="search-item-${i}" data-index="${i}"
+          role="option" aria-selected="${i === search.active}">
+          <span class="search-main">${escapeHtml(p.mainText?.text || p.text.text)}</span>
+          <span class="search-secondary">${escapeHtml(p.secondaryText?.text || '')}</span>
+        </li>`).join('');
+  searchInput.setAttribute('aria-activedescendant', search.active >= 0 ? `search-item-${search.active}` : '');
+  showSearchResults();
+}
+
+function showSearchResults() {
+  searchResults.hidden = false;
+  searchInput.setAttribute('aria-expanded', 'true');
+}
+
+function hideSearchResults() {
+  searchResults.hidden = true;
+  searchInput.setAttribute('aria-expanded', 'false');
+}
+
+function onSearchKeydown(e) {
+  const count = search.items.length;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    if (!count) return;
+    e.preventDefault();
+    search.active = (search.active + (e.key === 'ArrowDown' ? 1 : -1) + count) % count;
+    renderSearchResults('');
+    document.getElementById(`search-item-${search.active}`)?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (search.active >= 0 && !searchResults.hidden) selectSuggestion(search.active);
+  } else if (e.key === 'Escape') {
+    hideSearchResults();
+  }
+}
+
+async function selectSuggestion(index) {
+  const prediction = search.items[index];
+  if (!prediction) return;
+  hideSearchResults();
+  searchInput.value = prediction.mainText?.text || prediction.text.text;
+  searchInput.blur();
+  const place = prediction.toPlace();
+  search.token = null; // 取得地點資訊後這次搜尋就結束，下次輸入用新的 token
+  try {
+    await place.fetchFields({ fields: ['displayName', 'location', 'viewport'] });
+  } catch (err) {
+    console.warn('Places fetchFields:', err);
+    renderSearchResults('無法取得這個地點的資訊，請再試一次');
+    return;
+  }
+  if (!place.location) return;
+  if (place.viewport) {
+    map.fitBounds(place.viewport);
+  } else {
+    map.panTo(place.location);
+    map.setZoom(16);
+  }
+  openAddSpotForm(place.location, place.id, place.displayName || searchInput.value);
 }
 
 function createPinElement(dayIndex, spotIndex, dimmed) {
