@@ -34,8 +34,8 @@ const TRAVEL_MODES = [
   { value: 'TRANSIT', label: '大眾運輸', gmaps: 'transit' },
   { value: 'WALK', label: '步行', gmaps: 'walking' }
 ];
-const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }, { id: 'member-partner', name: '伴侶' }];
-const MIN_MEMBERS = 2;
+const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }];
+const MIN_MEMBERS = 1;
 // 每天的代表色（分頁、圖釘、卡片標頭），文字一律用黑色，所以都選明亮的顏色
 const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78BFA', '#22D3EE', '#F9A8D4'];
 
@@ -49,7 +49,7 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     activeDayId: dayId | OVERVIEW,
  *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 路段沒有個別設定時的交通方式
  *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
- *     members: [{ id, name }],                                // 旅伴，預設「我」與「伴侶」
+ *     members: [{ id, name }],                                // 旅伴，預設只有「我」
  *     expenses: [Expense]                                     // 記帳
  *   }
  *   Spot = { id, name, lat, lng, placeId, note }  // spots 陣列順序就是當天的參觀順序
@@ -245,7 +245,9 @@ function getMemberName(member) {
 }
 
 function getSharedLabel() {
-  return state.members.length === 2 ? '雙人均分' : `${state.members.length} 人均分`;
+  const count = state.members.length;
+  if (count === 1) return '均分';
+  return count === 2 ? '雙人均分' : `${count} 人均分`;
 }
 
 function countSpots() {
@@ -960,7 +962,9 @@ function renderSettlement() {
   if (!r.count) {
     verdict = `<p class="verdict-empty">還沒有記錄花費。在景點或交通卡片下方按「+ 記錄花費」開始記帳。</p>`;
   } else if (!r.transfers.length) {
-    verdict = `<p class="verdict-main">帳目已經平衡，不需要轉帳</p>`;
+    verdict = state.members.length === 1
+      ? `<p class="verdict-main">目前只有一位旅伴，不需要轉帳</p><p class="verdict-sub">按上方的「+ 旅伴」加入同行的人，就能分攤公費</p>`
+      : `<p class="verdict-main">帳目已經平衡，不需要轉帳</p>`;
   } else {
     verdict = r.transfers.map(t => `
       <p class="verdict-main">

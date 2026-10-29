@@ -2,7 +2,7 @@
  * 旅遊行程規劃：新野獸派 × 復古貼紙風
  * 版面：頂部導覽列（品牌｜搜尋膠囊｜旅伴＋結算）＋ 左側行程欄 ＋ 右側黑框地圖
  * 規則：所有卡片與按鈕都是純黑實線邊框 + 硬陰影；按下時往右下平移、陰影歸零；
- *       標籤做成微傾斜的手帳貼紙（傾斜角度用 --tilt 控制，按下時仍保留角度）。
+ *       狀態與花費標籤做成微傾斜的手帳貼紙（傾斜角度用 --tilt 控制）；天數分頁保持水平。
  * ========================================================================== */
 :root {
   /* 底色與墨色 */
@@ -297,12 +297,11 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding: 6px 4px 8px 2px; /* 留空間給傾斜角度與硬陰影 */
+  padding: 4px 4px 6px 2px; /* 留空間給硬陰影 */
   scrollbar-width: none;
 }
 .tabs::-webkit-scrollbar { display: none; }
 .tab {
-  --tilt: -2deg;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -313,8 +312,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   font-size: 13px;
   font-weight: 900;
 }
-.tabs .tab:nth-child(even) { --tilt: 2deg; }
-.tabs .tab:nth-child(3n) { --tilt: -1deg; }
 .tab.active { background: var(--c, var(--yellow)); }
 .tab-dot { width: 10px; height: 10px; border: var(--line); border-radius: 50%; background: var(--c); }
 .tab.active .tab-dot { background: var(--paper); }
@@ -326,7 +323,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
-.tab-add { --tilt: 3deg; border-style: dashed; background: var(--mint); }
+.tab-add { border-style: dashed; background: var(--mint); }
 
 /* 天數卡片 */
 .day-list {
