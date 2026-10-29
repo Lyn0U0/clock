@@ -36,7 +36,8 @@ const TRAVEL_MODES = [
 ];
 const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }, { id: 'member-partner', name: '伴侶' }];
 const MIN_MEMBERS = 2;
-const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#0091ff', '#d6409f', '#7c8a2e'];
+// 每天的代表色（分頁、圖釘、卡片標頭），文字一律用黑色，所以都選明亮的顏色
+const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78BFA', '#22D3EE', '#F9A8D4'];
 
 
 /* ==========================================================================
@@ -46,7 +47,7 @@ const DAY_COLORS = ['#4f6ef7', '#12a594', '#f5a524', '#e5484d', '#8e4ec6', '#009
  *   state = {
  *     days: [{ id, spots: [Spot] }],  // 陣列順序就是 Day 1、Day 2…
  *     activeDayId: dayId | OVERVIEW,
- *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 預設交通方式
+ *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 路段沒有個別設定時的交通方式
  *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
  *     members: [{ id, name }],                                // 旅伴，預設「我」與「伴侶」
  *     expenses: [Expense]                                     // 記帳
@@ -286,12 +287,6 @@ function removeDay(dayId) {
 function setActiveDay(dayId) {
   if (dayId !== OVERVIEW && !getDay(dayId)) return;
   state.activeDayId = dayId;
-  commit();
-}
-
-function setTravelMode(mode) {
-  if (!TRAVEL_MODES.some(m => m.value === mode) || mode === getTravelMode().value) return;
-  state.travelMode = mode;
   commit();
 }
 
@@ -711,7 +706,6 @@ function render() {
   renderSummary();
   renderMembers();
   renderSyncBar();
-  renderModePicker();
   renderTabs();
   renderDayList();
   renderSettleButton();
@@ -721,13 +715,6 @@ function render() {
   focusPendingExpense();
   refreshVisibleLegs();
   ui.lastLiveRefs = getLiveRefs();
-}
-
-function renderModePicker() {
-  const current = getTravelMode().value;
-  document.getElementById('mode-picker').innerHTML = TRAVEL_MODES.map(m => `
-      <button class="mode ${m.value === current ? 'active' : ''}" role="radio" aria-checked="${m.value === current}"
-        data-action="set-mode" data-mode="${m.value}" title="所有路段的預設交通方式">${ICONS[m.value]}${m.label}</button>`).join('');
 }
 
 function renderSummary() {
@@ -812,7 +799,7 @@ function renderSpotCard(spot, index, total) {
 
 function renderDayTravel(day) {
   const sec = day.spots.length > 1 ? getDayTravelSec(day) : null;
-  return sec === null ? '' : `・交通 ${formatDuration(sec)}`;
+  return sec === null ? '' : `交通 ${formatDuration(sec)}`;
 }
 
 // 兩個景點之間的路線卡片
@@ -1053,7 +1040,8 @@ function flashSpotCard(spotId) {
 
 const dayListEl = document.getElementById('day-list');
 
-document.querySelector('.sidebar').addEventListener('click', e => {
+// 側邊欄與頂部導覽列（旅伴、結算按鈕）共用同一套 data-action 點擊處理
+function onActionClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
   const spotId = btn.closest('.spot')?.dataset.spotId;
@@ -1069,7 +1057,6 @@ document.querySelector('.sidebar').addEventListener('click', e => {
     case 'toggle-note': toggleNoteEditor(spotId); break;
     case 'remove-spot': removeSpot(spotId); break;
     case 'focus-spot': focusSpotOnMap(spotId); break;
-    case 'set-mode': setTravelMode(btn.dataset.mode); break;
     case 'set-leg-mode': {
       const leg = btn.closest('.leg');
       setLegMode(leg.dataset.from, leg.dataset.to, btn.dataset.mode);
@@ -1095,7 +1082,10 @@ document.querySelector('.sidebar').addEventListener('click', e => {
       break;
     }
   }
-});
+}
+
+document.querySelector('.sidebar').addEventListener('click', onActionClick);
+document.querySelector('.topbar').addEventListener('click', onActionClick);
 
 dayListEl.addEventListener('input', e => {
   if (e.target.matches('textarea[data-spot-id]')) {
@@ -1832,7 +1822,7 @@ function applyRemoteChange() {
   if (isSyncReady() && sync.status === 'connecting') setSyncStatus(navigator.onLine ? 'synced' : 'offline');
   // 正在打字時整個重繪會讓輸入框失去焦點：先只更新金額，離開輸入框後再重繪
   const active = document.activeElement;
-  if (active?.matches('input, textarea') && active.closest('.sidebar')) {
+  if (active?.matches('input, textarea') && active.closest('.sidebar, .members')) {
     ui.renderOnBlur = true;
     refreshMoneyViews();
   } else {
@@ -1843,7 +1833,7 @@ function applyRemoteChange() {
 document.addEventListener('focusout', () => {
   if (!ui.renderOnBlur) return;
   setTimeout(() => {
-    if (document.activeElement?.matches('input, textarea') && document.activeElement.closest('.sidebar')) return;
+    if (document.activeElement?.matches('input, textarea') && document.activeElement.closest('.sidebar, .members')) return;
     ui.renderOnBlur = false;
     render();
   }, 0);

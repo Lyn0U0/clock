@@ -5,64 +5,73 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>旅遊行程規劃</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <div class="title-row">
-        <h1>旅遊行程規劃</h1>
-        <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog">
-          💰 旅費結算 <span class="settle-btn-total" id="settle-total">NT$ 0</span>
-        </button>
-      </div>
-      <p>點擊地圖加入景點，拖曳或用箭頭調整每天的順序。</p>
-      <div class="summary" id="summary"></div>
-      <div class="members" id="members"></div>
-      <div class="sync-bar" id="sync-bar"></div>
-      <div class="mode-picker" id="mode-picker" role="radiogroup" aria-label="交通方式"></div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M10.5 13.5 3 11l1.5-1.5 8 1 4-4.5c1-1 2.5-1.5 3.5-.5s.5 2.5-.5 3.5l-4.5 4 1 8L14.5 22 12 14.5"/></svg>
+      </span>
+      <h1>旅遊行程規劃</h1>
     </div>
-    <div class="tabs-bar">
-      <nav class="tabs" id="tabs" role="tablist" aria-label="切換天數"></nav>
-      <button class="tab tab-add" data-action="add-day" title="新增一天">+ Day</button>
-    </div>
-    <div class="day-list" id="day-list"></div>
-  </aside>
-
-  <main class="map-wrap">
-    <div id="map"></div>
     <div class="search" role="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="place-search" type="search" placeholder="搜尋地點，或直接點擊地圖" autocomplete="off" disabled
         role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" aria-label="搜尋地點">
       <ul class="search-results" id="search-results" role="listbox" hidden></ul>
     </div>
-    <button class="key-btn" id="key-btn" type="button" title="查看或更換 Google Maps 金鑰">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
-      地圖金鑰
-    </button>
-    <div class="setup" id="setup" role="dialog" aria-labelledby="setup-title" hidden>
-      <div class="setup-card">
-        <h2 id="setup-title">設定 Google Maps 金鑰</h2>
-        <p class="setup-error" id="setup-error" hidden></p>
-        <ol>
-          <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
-          <li>啟用 <strong>Maps JavaScript API</strong> 與 <strong>Routes API</strong>（交通時間）；搜尋地點、點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>。</li>
-          <li>在金鑰的「應用程式限制」選「網站」，加入 <code>lyn0u0.github.io/*</code>。</li>
-        </ol>
-        <p>金鑰只會存在這台瀏覽器。要讓所有人打開就能用，請把金鑰填進 <code>app.js</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。</p>
-        <form class="setup-form" id="setup-form">
-          <input id="setup-key" type="text" placeholder="貼上 API 金鑰（AIza…）" autocomplete="off" spellcheck="false">
-          <button type="submit" class="btn-primary">使用金鑰</button>
-        </form>
-        <div class="setup-actions">
-          <button type="button" class="btn-text danger" id="setup-clear" hidden>清除這台瀏覽器的金鑰</button>
-          <button type="button" class="btn-text" id="setup-cancel" hidden>取消，回到地圖</button>
+    <div class="topbar-right">
+      <div class="members" id="members"></div>
+      <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog">
+        <span>💰 旅費結算</span><span class="settle-btn-total" id="settle-total">NT$ 0</span>
+      </button>
+    </div>
+  </header>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="summary" id="summary"></div>
+        <p class="hint">點地圖或搜尋加入景點，拖曳或用箭頭調整順序。</p>
+        <div class="sync-bar" id="sync-bar"></div>
+      </div>
+      <div class="tabs-bar">
+        <nav class="tabs" id="tabs" role="tablist" aria-label="切換天數"></nav>
+        <button class="tab tab-add" data-action="add-day" title="新增一天">+ Day</button>
+      </div>
+      <div class="day-list" id="day-list"></div>
+    </aside>
+
+    <main class="map-wrap">
+      <div id="map"></div>
+      <button class="key-btn" id="key-btn" type="button" title="查看或更換 Google Maps 金鑰">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
+        地圖金鑰
+      </button>
+      <div class="setup" id="setup" role="dialog" aria-labelledby="setup-title" hidden>
+        <div class="setup-card">
+          <h2 id="setup-title">設定 Google Maps 金鑰</h2>
+          <p class="setup-error" id="setup-error" hidden></p>
+          <ol>
+            <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
+            <li>啟用 <strong>Maps JavaScript API</strong> 與 <strong>Routes API</strong>（交通時間）；搜尋地點、點地圖上的店家自動帶入名稱，需再啟用 <strong>Places API (New)</strong>。</li>
+            <li>在金鑰的「應用程式限制」選「網站」，加入 <code>lyn0u0.github.io/*</code>。</li>
+          </ol>
+          <p>金鑰只會存在這台瀏覽器。要讓所有人打開就能用，請把金鑰填進 <code>app.js</code> 的 <code>GOOGLE_MAPS_API_KEY</code>。</p>
+          <form class="setup-form" id="setup-form">
+            <input id="setup-key" type="text" placeholder="貼上 API 金鑰（AIza…）" autocomplete="off" spellcheck="false">
+            <button type="submit" class="btn-primary">使用金鑰</button>
+          </form>
+          <div class="setup-actions">
+            <button type="button" class="btn-text danger" id="setup-clear" hidden>清除這台瀏覽器的金鑰</button>
+            <button type="button" class="btn-text" id="setup-cancel" hidden>取消，回到地圖</button>
+          </div>
         </div>
       </div>
-    </div>
-  </main>
+    </main>
+  </div>
 
   <div class="drawer-backdrop" id="settle-backdrop" hidden></div>
   <aside class="drawer" id="settle-drawer" role="dialog" aria-modal="true" aria-labelledby="settle-title" hidden>
