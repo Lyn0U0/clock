@@ -760,6 +760,35 @@ function renderTripHeader() {
   if (document.activeElement !== nameInput) nameInput.value = state.tripName;
   if (document.activeElement !== dateInput) dateInput.value = state.startDate;
   document.title = state.tripName.trim() || DEFAULT_TRIP_NAME;
+  renderCountdown();
+}
+
+// 出發倒數：出發前顯示剩幾天，旅途中顯示第幾天，結束後顯示已結束
+function renderCountdown() {
+  const el = document.getElementById('countdown');
+  const start = getDayDate(0);
+  el.hidden = !start;
+  if (!start) return;
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((start - today) / 86400000);
+  let text;
+  let tone;
+  if (diff > 0) {
+    text = `倒數 <strong>${diff}</strong> 天出發`;
+    tone = 'upcoming';
+  } else if (diff === 0) {
+    text = '今天出發！';
+    tone = 'today';
+  } else if (-diff < state.days.length) {
+    text = `旅行中・第 <strong>${-diff + 1}</strong> 天`;
+    tone = 'today';
+  } else {
+    text = '旅程已結束';
+    tone = 'past';
+  }
+  el.className = `countdown ${tone}`;
+  el.innerHTML = text;
 }
 
 function renderTabs() {

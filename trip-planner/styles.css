@@ -152,6 +152,20 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   cursor: pointer;
 }
 .trip-date:focus-within { box-shadow: var(--shadow-btn); }
+.trip-plan { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.countdown {
+  padding: 4px 12px;
+  border: var(--line);
+  border-radius: 999px;
+  background: var(--yellow);
+  box-shadow: var(--shadow-btn);
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.countdown strong { font-size: 17px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.countdown.today { background: var(--mint); }
+.countdown.past { background: var(--paper); color: var(--muted); box-shadow: none; }
 
 /* 搜尋膠囊 */
 .search { position: relative; justify-self: center; width: min(520px, 100%); }

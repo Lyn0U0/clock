@@ -19,10 +19,6 @@
           <input id="trip-name" class="trip-name" type="text" maxlength="30" placeholder="旅遊行程規劃"
             autocomplete="off" aria-label="旅程名稱（點一下可改名）" title="點一下可改名">
         </h1>
-        <label class="trip-date">
-          <span>出發</span>
-          <input id="trip-start" type="date" aria-label="出發日期">
-        </label>
       </div>
     </div>
     <div class="search" role="search">
@@ -43,6 +39,13 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="summary" id="summary"></div>
+        <div class="trip-plan">
+          <label class="trip-date">
+            <span>出發日</span>
+            <input id="trip-start" type="date" aria-label="出發日期">
+          </label>
+          <span class="countdown" id="countdown" role="status" hidden></span>
+        </div>
         <p class="hint">點地圖或搜尋加入景點，拖曳或用箭頭調整順序。</p>
         <div class="sync-bar" id="sync-bar"></div>
       </div>
