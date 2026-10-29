@@ -46,6 +46,8 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  * 所有資料只存在 state 裡，清單、分頁、地圖圖釘都由它產生：
  *   state = {
  *     days: [{ id, spots: [Spot] }],  // 陣列順序就是 Day 1、Day 2…
+ *     tripName: '',                       // 旅程名稱，空白時顯示「旅遊行程規劃」
+ *     startDate: 'YYYY-MM-DD' | '',       // 出發日期；設定後每天會標上日期
  *     activeDayId: dayId | OVERVIEW,
  *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 路段沒有個別設定時的交通方式
  *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
@@ -127,6 +129,8 @@ function loadSharedCache() {
 function normalizeState(s) {
   if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
   if (!Array.isArray(s.expenses)) s.expenses = [];
+  if (typeof s.tripName !== 'string') s.tripName = '';
+  if (typeof s.startDate !== 'string') s.startDate = '';
   return s;
 }
 
@@ -175,6 +179,27 @@ function getDay(dayId) {
 
 function getDayIndex(dayId) {
   return state.days.findIndex(d => d.id === dayId);
+}
+
+const DEFAULT_TRIP_NAME = '旅遊行程規劃';
+const WEEKDAYS = '日一二三四五六';
+
+// 出發日期加上天數；沒設定出發日期時回傳 null
+function getDayDate(dayIndex) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(state.startDate || '');
+  if (!match) return null;
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + dayIndex);
+}
+
+function formatDayDate(date, withWeekday = true) {
+  const text = `${date.getMonth() + 1}/${date.getDate()}`;
+  return withWeekday ? `${text}（${WEEKDAYS[date.getDay()]}）` : text;
+}
+
+// 例如「11/3（一）」；沒設定出發日期時是空字串
+function getDayDateText(dayIndex, withWeekday = true) {
+  const date = getDayDate(dayIndex);
+  return date ? formatDayDate(date, withWeekday) : '';
 }
 
 function getDayLabel(dayIndex) {
@@ -705,6 +730,7 @@ function escapeHtml(str) {
 }
 
 function render() {
+  renderTripHeader();
   renderSummary();
   renderMembers();
   renderSyncBar();
@@ -720,18 +746,30 @@ function render() {
 }
 
 function renderSummary() {
+  const range = state.startDate
+    ? `・${getDayDateText(0, false)} – ${getDayDateText(state.days.length - 1, false)}`
+    : '';
   document.getElementById('summary').innerHTML =
-    `<strong>${state.days.length}</strong> 天・<strong>${countSpots()}</strong> 個景點`;
+    `<strong>${state.days.length}</strong> 天・<strong>${countSpots()}</strong> 個景點${range}`;
+}
+
+// 頂部的旅程名稱與出發日期；正在編輯的欄位不覆蓋，避免打斷輸入
+function renderTripHeader() {
+  const nameInput = document.getElementById('trip-name');
+  const dateInput = document.getElementById('trip-start');
+  if (document.activeElement !== nameInput) nameInput.value = state.tripName;
+  if (document.activeElement !== dateInput) dateInput.value = state.startDate;
+  document.title = state.tripName.trim() || DEFAULT_TRIP_NAME;
 }
 
 function renderTabs() {
   const tabs = [{ id: OVERVIEW, label: '全部', color: null, count: countSpots() }]
-    .concat(state.days.map((d, i) => ({ id: d.id, label: getDayLabel(i), color: getDayColor(i), count: d.spots.length })));
+    .concat(state.days.map((d, i) => ({ id: d.id, label: getDayLabel(i), date: getDayDateText(i, false), color: getDayColor(i), count: d.spots.length })));
   document.getElementById('tabs').innerHTML = tabs.map(t => `
       <button class="tab ${t.id === state.activeDayId ? 'active' : ''}" role="tab"
         aria-selected="${t.id === state.activeDayId}" data-action="select-day" data-day-id="${t.id}"
         ${t.color ? `style="--c:${t.color}"` : ''}>
-        ${t.color ? '<span class="tab-dot"></span>' : ''}${t.label}<span class="tab-count">${t.count}</span>
+        ${t.color ? '<span class="tab-dot"></span>' : ''}${t.label}${t.date ? `<span class="tab-date">${t.date}</span>` : ''}<span class="tab-count">${t.count}</span>
       </button>`).join('');
   document.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
@@ -746,10 +784,13 @@ function renderDayList() {
         <header class="day-head">
           <span class="day-dot"></span>
           <h2 class="day-title">${label}</h2>
-          <span class="day-count">${day.spots.length} 個景點</span>
-          <span class="day-travel" data-day-id="${day.id}">${renderDayTravel(day)}</span>
-          <button class="btn-text danger" data-action="remove-day" data-day-id="${day.id}"
-            ${canRemoveDay ? '' : 'disabled title="至少要保留一天"'}>刪除此天</button>
+          ${getDayDateText(dayIndex) ? `<span class="day-date">${getDayDateText(dayIndex)}</span>` : ''}
+          <span class="day-badges">
+            <span class="day-count">${day.spots.length} 個景點</span>
+            <span class="day-travel" data-day-id="${day.id}">${renderDayTravel(day)}</span>
+          </span>
+          <button class="icon-btn danger day-remove" data-action="remove-day" data-day-id="${day.id}"
+            ${canRemoveDay ? `title="刪除 ${label}" aria-label="刪除 ${label}"` : 'disabled title="至少要保留一天" aria-label="至少要保留一天"'}>${ICONS.trash}</button>
         </header>
         ${day.spots.length
           ? `<ol class="spot-list" data-day-id="${day.id}">${renderDaySpots(day)}</ol>`
@@ -1099,6 +1140,25 @@ dayListEl.addEventListener('input', e => {
   }
 });
 
+// ---------- 旅程名稱與出發日期 ----------
+const tripNameInput = document.getElementById('trip-name');
+tripNameInput.addEventListener('input', () => {
+  state.tripName = tripNameInput.value;
+  document.title = state.tripName.trim() || DEFAULT_TRIP_NAME;
+  saveState();
+});
+tripNameInput.addEventListener('change', () => {
+  state.tripName = tripNameInput.value.trim();
+  commit();
+});
+tripNameInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') tripNameInput.blur();
+});
+document.getElementById('trip-start').addEventListener('change', e => {
+  state.startDate = e.target.value;
+  commit();
+});
+
 // ---------- 旅伴名稱 ----------
 const membersEl = document.getElementById('members');
 membersEl.addEventListener('input', e => {
@@ -1330,7 +1390,7 @@ function openAddSpotForm(latLng, placeId, name) {
     </label>
     <label>加入哪一天
       <select name="day">
-        ${state.days.map((d, i) => `<option value="${d.id}" ${d.id === defaultDayId ? 'selected' : ''}>${getDayLabel(i)}（${d.spots.length} 個景點）</option>`).join('')}
+        ${state.days.map((d, i) => `<option value="${d.id}" ${d.id === defaultDayId ? 'selected' : ''}>${getDayLabel(i)}${getDayDateText(i) ? `・${getDayDateText(i)}` : ''}（${d.spots.length} 個景點）</option>`).join('')}
       </select>
     </label>
     <button type="submit" class="btn-primary">加入行程</button>
@@ -1602,6 +1662,8 @@ function stableStringify(value) {
 
 function pickTripData(source) {
   return {
+    tripName: source.tripName || '',
+    startDate: source.startDate || '',
     days: source.days,
     travelMode: source.travelMode || TRAVEL_MODES[0].value,
     legModes: source.legModes || {},
@@ -1781,6 +1843,8 @@ function mergeTrip(base, local, remote) {
   const byId = list => Object.fromEntries(list.map(m => [m.id, m]));
   const members = mergeMap(byId(base.members), byId(local.members), byId(remote.members));
   return {
+    tripName: pick(base.tripName, local.tripName, remote.tripName),
+    startDate: pick(base.startDate, local.startDate, remote.startDate),
     days: days.length ? days : remote.days,
     travelMode: pick(base.travelMode, local.travelMode, remote.travelMode),
     legModes: mergeMap(base.legModes, local.legModes, remote.legModes),
@@ -1826,7 +1890,7 @@ function applyRemoteChange() {
   if (isSyncReady() && sync.status === 'connecting') setSyncStatus(navigator.onLine ? 'synced' : 'offline');
   // 正在打字時整個重繪會讓輸入框失去焦點：先只更新金額，離開輸入框後再重繪
   const active = document.activeElement;
-  if (active?.matches('input, textarea') && active.closest('.sidebar, .members')) {
+  if (active?.matches('input, textarea') && active.closest('.sidebar, .members, .trip-meta')) {
     ui.renderOnBlur = true;
     refreshMoneyViews();
   } else {
@@ -1837,7 +1901,7 @@ function applyRemoteChange() {
 document.addEventListener('focusout', () => {
   if (!ui.renderOnBlur) return;
   setTimeout(() => {
-    if (document.activeElement?.matches('input, textarea') && document.activeElement.closest('.sidebar, .members')) return;
+    if (document.activeElement?.matches('input, textarea') && document.activeElement.closest('.sidebar, .members, .trip-meta')) return;
     ui.renderOnBlur = false;
     render();
   }, 0);

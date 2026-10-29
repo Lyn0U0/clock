@@ -14,7 +14,16 @@
       <span class="brand-mark" aria-hidden="true">
         <svg viewBox="0 0 24 24"><path d="M10.5 13.5 3 11l1.5-1.5 8 1 4-4.5c1-1 2.5-1.5 3.5-.5s.5 2.5-.5 3.5l-4.5 4 1 8L14.5 22 12 14.5"/></svg>
       </span>
-      <h1>旅遊行程規劃</h1>
+      <div class="trip-meta">
+        <h1 class="trip-title">
+          <input id="trip-name" class="trip-name" type="text" maxlength="30" placeholder="旅遊行程規劃"
+            autocomplete="off" aria-label="旅程名稱（點一下可改名）" title="點一下可改名">
+        </h1>
+        <label class="trip-date">
+          <span>出發</span>
+          <input id="trip-start" type="date" aria-label="出發日期">
+        </label>
+      </div>
     </div>
     <div class="search" role="search">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>

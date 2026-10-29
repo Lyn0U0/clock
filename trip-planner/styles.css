@@ -110,7 +110,48 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: var(--shadow-btn);
 }
 .brand-mark svg { width: 22px; height: 22px; stroke-width: 2.4; }
-.brand h1 { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: .02em; white-space: nowrap; }
+.trip-meta { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.trip-title { margin: 0; min-width: 0; }
+/* 旅程名稱：看起來像標題，點一下就能改名 */
+.trip-name {
+  field-sizing: content;
+  min-width: 4em;
+  max-width: 14em;
+  padding: 2px 8px;
+  border: 2px dashed transparent;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: .02em;
+  outline: none;
+}
+.trip-name::placeholder { color: var(--ink); opacity: 1; }
+.trip-name:hover { border-color: var(--ink); }
+.trip-name:focus { border-style: solid; border-color: var(--ink); background: var(--yellow-soft); }
+.trip-date {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 12px;
+  border: var(--line);
+  border-radius: 999px;
+  background: var(--blue-soft);
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+.trip-date input {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 3px 6px;
+  outline: none;
+  cursor: pointer;
+}
+.trip-date:focus-within { box-shadow: var(--shadow-btn); }
 
 /* 搜尋膠囊 */
 .search { position: relative; justify-self: center; width: min(520px, 100%); }
@@ -313,6 +354,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .tab.active { background: var(--c, var(--yellow)); }
 .tab-dot { width: 10px; height: 10px; border: var(--line); border-radius: 50%; background: var(--c); }
 .tab.active .tab-dot { background: var(--paper); }
+.tab-date { font-size: 11px; font-weight: 700; }
 .tab-count {
   min-width: 20px;
   padding: 0 5px;
@@ -350,10 +392,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 .day-dot { width: 14px; height: 14px; border: var(--line); border-radius: 50%; background: var(--c); }
 .day-title { margin: 0; font-size: 19px; font-weight: 900; }
+.day-date { font-size: 13px; font-weight: 900; }
 .day-count { padding: 2px 8px; background: var(--paper); font-size: 11px; font-variant-numeric: tabular-nums; }
 .day-travel { padding: 2px 8px; background: var(--mint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .day-travel:empty { display: none; }
-.day-head .btn-text { margin-left: auto; }
+.day-head .day-remove { margin-left: auto; flex-shrink: 0; }
+/* 有出發日期時標題列較擠：景點數與交通時間換到第二行 */
+.day-badges { display: inline-flex; gap: 8px; }
+.day-head:has(.day-date) .day-badges { order: 1; flex-basis: 100%; padding-left: 22px; }
 .day-empty { margin: 0; padding: 22px 14px; font-size: 13px; font-weight: 700; color: var(--muted); text-align: center; }
 
 .btn-text {
@@ -827,12 +873,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 @media (max-width: 760px) {
   .topbar {
     grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "brand settle" "search search" "members members";
+    grid-template-areas: "brand brand" "search search" "members settle";
     gap: 10px 12px;
     padding: 10px 16px 12px;
   }
   .brand { grid-area: brand; }
-  .brand h1 { font-size: 18px; }
+  .trip-meta { flex-wrap: wrap; gap: 4px 8px; }
+  .trip-name { font-size: 18px; max-width: 100%; }
   .brand-mark { width: 34px; height: 34px; }
   .topbar-right { display: contents; }
   .settle-btn { grid-area: settle; font-size: 12px; padding-left: 12px; }
