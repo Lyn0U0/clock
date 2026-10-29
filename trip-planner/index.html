@@ -87,8 +87,19 @@
     <main class="map-wrap">
       <div id="map"></div>
       <div class="map-tools">
+        <label class="map-chip route-select" title="地圖上當天路線的交通方式">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg>
+          <span class="sr-only">當日路線</span>
+          <select id="route-mode" aria-label="當日路線的交通方式" hidden>
+            <option value="TRANSIT">大眾運輸路線</option>
+            <option value="WALKING">步行路線</option>
+            <option value="DRIVING">開車路線</option>
+            <option value="OFF">不顯示路線</option>
+          </select>
+        </label>
         <button class="map-chip style-btn" id="style-btn" type="button" aria-pressed="true" hidden></button>
       </div>
+      <p class="route-status" id="route-status" role="status" hidden></p>
       <div class="map-controls" id="map-controls" hidden>
         <button type="button" data-map="zoom-in" aria-label="放大" title="放大">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>

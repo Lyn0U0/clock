@@ -11,6 +11,8 @@
    - **Maps JavaScript API**：地圖
    - **Routes API**：景點間的交通時間
    - **Places API (New)**：搜尋地點、點選地圖上的店家自動帶入名稱
+   - **Directions API**（選用）：在地圖上畫出當天的路線。這是 Google 的舊版服務，新專案可能無法啟用；
+     無法使用時，網站會改用 Routes API 算交通時間時取得的各路段路線來畫，不需要另外設定。
 3. 在金鑰的「應用程式限制」選「網站」，加入 `lyn0u0.github.io/*`。
 4. 把金鑰填進 `app.js` 的 `GOOGLE_MAPS_API_KEY`。也可以先在網頁上貼上金鑰試用，只會存在那台瀏覽器。
 

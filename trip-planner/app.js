@@ -608,7 +608,7 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
       headers: {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
-        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.description'
+        'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.description,routes.polyline.encodedPolyline'
       },
       body: JSON.stringify(body)
     });
@@ -628,7 +628,8 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
     status: 'ok',
     durationSec: parseInt(route.duration, 10) || 0,
     distanceMeters: route.distanceMeters || 0,
-    description: route.description || ''
+    description: route.description || '',
+    polyline: route.polyline?.encodedPolyline || '' // 當日路線的備援畫法會用到
   };
 }
 
@@ -786,7 +787,10 @@ function render() {
   renderDayList();
   renderSettleButton();
   renderSettlement();
-  if (map) syncMarkers();
+  if (map) {
+    syncMarkers();
+    scheduleDayRoute();
+  }
   flashPendingSpot();
   focusPendingExpense();
   refreshVisibleLegs();
@@ -1000,6 +1004,7 @@ function updateLegViews() {
     const day = getDay(el.dataset.dayId);
     if (day) el.textContent = renderDayTravel(day);
   });
+  if (dayRoute.denied) scheduleDayRoute(); // 備援畫法用的是各路段的路線，路段算好後要重畫
 }
 
 /* ---------- 記帳區（景點卡與交通卡共用） ---------- */
@@ -1530,6 +1535,7 @@ async function initMap() {
 
   setupPlaceSearch();
   renderStyleButton();
+  await initDayRoute();
   document.getElementById('map-controls').hidden = false;
   render();
   fitMapToSpots(getVisibleDays().flatMap(d => d.spots));
@@ -1970,6 +1976,258 @@ function fitMapToSpots(spots) {
   const bounds = new google.maps.LatLngBounds();
   spots.forEach(s => bounds.extend({ lat: s.lat, lng: s.lng }));
   map.fitBounds(bounds, 60);
+}
+
+
+/* ==========================================================================
+ * 8b. 當日路線（DirectionsService + DirectionsRenderer）
+ *
+ * 選了某一天時，把當天的景點依序畫成一條路線（「全部」分頁不畫）。
+ *   - 步行、開車：一次請求，第一個景點為起點、最後一個為終點，中間的景點為 waypoints。
+ *   - 大眾運輸：Directions 不支援大眾運輸搭配 waypoints，所以兩點一段分別請求；
+ *     某段沒有大眾運輸（ZERO_RESULTS）時，自動改用步行，並以虛線顯示。
+ *   - 新增、刪除、排序、切換天數都會經過 render() → scheduleDayRoute()，0.4 秒防抖後重算；
+ *     景點與交通方式沒變就不重算，算過的結果也會快取。
+ *   - Directions API 是 Google 的舊版服務，新專案可能無法啟用（REQUEST_DENIED）。
+ *     這時改用 Routes API 算交通時間時一併取得的各路段路線來畫，不另外呼叫 API。
+ * ========================================================================== */
+
+const ROUTE_MODE_STORAGE = 'trip-planner-route-mode'; // 只存在這台裝置
+const ROUTE_MODES = [
+  { value: 'TRANSIT', label: '大眾運輸' },
+  { value: 'WALKING', label: '步行' },
+  { value: 'DRIVING', label: '開車' },
+  { value: 'OFF', label: '不顯示' }
+];
+const dayRoute = {
+  service: null,
+  DirectionsRenderer: null,
+  Polyline: null,
+  renderers: [], // DirectionsRenderer
+  lines: [],     // 黑色描邊與備援畫法的 Polyline
+  timer: null,
+  seq: 0,
+  drawnKey: '',
+  cache: new Map(), // 請求內容 → { result, status }
+  denied: false
+};
+
+async function initDayRoute() {
+  const select = document.getElementById('route-mode');
+  try {
+    const { DirectionsService, DirectionsRenderer } = await google.maps.importLibrary('routes');
+    dayRoute.service = new DirectionsService();
+    dayRoute.DirectionsRenderer = DirectionsRenderer;
+  } catch {
+    dayRoute.denied = true; // 載入不到就直接用備援畫法
+  }
+  dayRoute.Polyline = google.maps.Polyline || (await google.maps.importLibrary('maps')).Polyline;
+  select.value = getRouteMode();
+  select.hidden = false;
+  select.addEventListener('change', () => {
+    try {
+      localStorage.setItem(ROUTE_MODE_STORAGE, select.value);
+    } catch {}
+    scheduleDayRoute(0);
+  });
+}
+
+function getRouteMode() {
+  try {
+    const saved = localStorage.getItem(ROUTE_MODE_STORAGE);
+    if (ROUTE_MODES.some(m => m.value === saved)) return saved;
+  } catch {}
+  return 'TRANSIT';
+}
+
+function scheduleDayRoute(delay = 400) {
+  if (!map) return;
+  clearTimeout(dayRoute.timer);
+  dayRoute.timer = setTimeout(drawDayRoute, delay);
+}
+
+function setRouteStatus(text, tone = 'info') {
+  const el = document.getElementById('route-status');
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.className = `route-status ${tone}`;
+}
+
+function clearDayRoute() {
+  dayRoute.renderers.forEach(r => {
+    r.setDirections({ routes: [] });
+    r.setMap(null);
+  });
+  dayRoute.lines.forEach(line => line.setMap(null));
+  dayRoute.renderers = [];
+  dayRoute.lines = [];
+}
+
+function toDirectionsPlace(spot) {
+  return spot.placeId ? { placeId: spot.placeId } : { lat: spot.lat, lng: spot.lng };
+}
+
+// 以 callback 取得 status；同時吃掉新版 API 回傳的 Promise 的 reject，避免主控台出現未處理的錯誤
+function requestDirections(request) {
+  const cacheKey = JSON.stringify(request);
+  if (dayRoute.cache.has(cacheKey)) return Promise.resolve(dayRoute.cache.get(cacheKey));
+  return new Promise(resolve => {
+    const done = (result, status) => {
+      if (status === 'OK' || status === 'ZERO_RESULTS') dayRoute.cache.set(cacheKey, { result, status });
+      resolve({ result, status });
+    };
+    try {
+      const pending = dayRoute.service.route(request, done);
+      pending?.catch?.(() => {});
+    } catch {
+      resolve({ result: null, status: 'UNKNOWN_ERROR' });
+    }
+  });
+}
+
+// 回傳 [{ result, walkFallback }]；遇到 REQUEST_DENIED 丟出錯誤
+async function computeDirections(spots, mode) {
+  const ask = async request => {
+    const response = await requestDirections(request);
+    if (response.status === 'REQUEST_DENIED') throw Object.assign(new Error('denied'), { denied: true });
+    return response;
+  };
+  const walkingOf = request => ({ ...request, travelMode: 'WALKING' });
+
+  if (mode !== 'TRANSIT') {
+    const request = {
+      origin: toDirectionsPlace(spots[0]),
+      destination: toDirectionsPlace(spots[spots.length - 1]),
+      waypoints: spots.slice(1, -1).map(spot => ({ location: toDirectionsPlace(spot), stopover: true })),
+      travelMode: mode
+    };
+    let { result, status } = await ask(request);
+    if (status === 'ZERO_RESULTS' && mode !== 'WALKING') {
+      ({ result, status } = await ask(walkingOf(request)));
+      if (status === 'OK') return [{ result, walkFallback: true }];
+    }
+    if (status !== 'OK') throw Object.assign(new Error(status), { status });
+    return [{ result, walkFallback: false }];
+  }
+
+  // 大眾運輸：逐段請求，沒有大眾運輸的路段改用步行
+  const segments = [];
+  for (let i = 0; i < spots.length - 1; i++) {
+    const request = { origin: toDirectionsPlace(spots[i]), destination: toDirectionsPlace(spots[i + 1]), travelMode: 'TRANSIT' };
+    let { result, status } = await ask(request);
+    let walkFallback = false;
+    if (status === 'ZERO_RESULTS') {
+      ({ result, status } = await ask(walkingOf(request)));
+      walkFallback = true;
+    }
+    if (status === 'OK') segments.push({ result, walkFallback });
+    else segments.push(null); // 這段畫不出來，其他段照畫
+  }
+  return segments;
+}
+
+function dashedLineOptions(color) {
+  return {
+    strokeOpacity: 0,
+    icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: color, strokeWeight: 3, scale: 3 }, offset: '0', repeat: '14px' }]
+  };
+}
+
+function drawSegment(path, color, dashed, extra = {}) {
+  // 黑色描邊（新粗獷風格），再疊上當天的顏色
+  if (!dashed) {
+    dayRoute.lines.push(new dayRoute.Polyline({ map, path, strokeColor: '#18181B', strokeOpacity: 1, strokeWeight: 9, zIndex: 1, clickable: false }));
+  }
+  return { strokeColor: color, strokeOpacity: 1, strokeWeight: 5, zIndex: 2, ...(dashed ? dashedLineOptions(color) : {}), ...extra };
+}
+
+async function drawDayRoute() {
+  const day = state.activeDayId === OVERVIEW ? null : getDay(state.activeDayId);
+  const mode = getRouteMode();
+  const spots = day ? day.spots : [];
+  const polylineCount = dayRoute.denied ? getDayLegs(day || { spots: [] }).filter(({ from, to }) =>
+    legCache.get(getLegKey(from, to, getLegMode(from, to).value))?.polyline).length : 0;
+  const key = day && mode !== 'OFF' && spots.length >= 2
+    ? `${day.id}|${mode}|${dayRoute.denied ? `fallback${polylineCount}` : ''}|${spots.map(s => `${s.id}@${s.lat},${s.lng}`).join('>')}`
+    : '';
+  if (key === dayRoute.drawnKey) return;
+  dayRoute.drawnKey = key;
+  const seq = ++dayRoute.seq;
+  clearDayRoute();
+
+  if (!key) {
+    // 少於兩個景點、沒選特定一天、或關閉路線：清掉線條即可
+    const overviewHint = mode !== 'OFF' && !day && state.days.some(d => d.spots.length >= 2) ? '選一天，地圖會畫出當天的路線' : '';
+    setRouteStatus(overviewHint);
+    return;
+  }
+
+  const color = getDayColor(getDayIndex(day.id));
+  if (dayRoute.denied) {
+    drawFallbackRoute(day, color);
+    return;
+  }
+
+  setRouteStatus('規劃路線中…');
+  let segments;
+  try {
+    segments = await computeDirections(spots, mode);
+  } catch (err) {
+    if (seq !== dayRoute.seq) return;
+    if (err.denied) {
+      dayRoute.denied = true;
+      dayRoute.drawnKey = '';
+      scheduleDayRoute(0);
+      return;
+    }
+    console.warn('Directions:', err);
+    setRouteStatus('這天的景點之間找不到可行的路線', 'warn');
+    return;
+  }
+  if (seq !== dayRoute.seq) return; // 已經有更新的請求
+
+  segments.forEach(segment => {
+    if (!segment) return;
+    const path = segment.result.routes[0]?.overview_path || [];
+    const renderer = new dayRoute.DirectionsRenderer({
+      map,
+      suppressMarkers: true,   // 已經有自己的行程圖釘，不要 Google 的 A、B、C 標記
+      preserveViewport: true,  // 不要每次重畫都跳動地圖
+      polylineOptions: drawSegment(path, color, segment.walkFallback)
+    });
+    renderer.setDirections(segment.result);
+    dayRoute.renderers.push(renderer);
+  });
+
+  const missing = segments.filter(s => !s).length;
+  const walked = segments.filter(s => s?.walkFallback).length;
+  if (missing) setRouteStatus(`有 ${missing} 段找不到路線，其餘路段已畫出`, 'warn');
+  else if (walked) setRouteStatus(`有 ${walked} 段沒有${mode === 'TRANSIT' ? '大眾運輸' : '可行的路線'}，已改用步行（虛線）`, 'warn');
+  else setRouteStatus('');
+}
+
+// 備援：用 Routes API 各路段的路線（依每段自己的交通方式）畫出當天路線
+async function drawFallbackRoute(day, color) {
+  let encoding;
+  try {
+    ({ encoding } = await google.maps.importLibrary('geometry'));
+  } catch {
+    setRouteStatus('無法載入路線繪製元件', 'warn');
+    return;
+  }
+  let drawn = 0;
+  const legs = getDayLegs(day);
+  legs.forEach(({ from, to }) => {
+    const leg = legCache.get(getLegKey(from, to, getLegMode(from, to).value));
+    if (!leg?.polyline) return;
+    const path = encoding.decodePath(leg.polyline);
+    const walking = getLegMode(from, to).value === 'WALK';
+    dayRoute.lines.push(new dayRoute.Polyline({ map, path, clickable: false, ...drawSegment(path, color, walking) }));
+    drawn++;
+  });
+  setRouteStatus(drawn < legs.length
+    ? '路線計算中…（Directions API 無法使用，改用各路段的交通方式畫出路線）'
+    : 'Directions API 無法使用，已依各路段的交通方式畫出路線', 'info');
 }
 
 

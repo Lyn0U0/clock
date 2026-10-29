@@ -769,6 +769,41 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   border-radius: 999px;
   font-size: 12px;
 }
+/* 當日路線的交通方式 */
+.route-select { padding: 0 6px 0 10px; }
+.route-select:has(select[hidden]) { display: none; }
+.route-select select {
+  appearance: none;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 0 18px 0 2px;
+  height: 100%;
+  cursor: pointer;
+  outline: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+  background-position: calc(100% - 9px) 55%, calc(100% - 5px) 55%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.route-status {
+  position: absolute;
+  top: 70px; right: 30px;
+  z-index: 500;
+  max-width: min(320px, calc(100% - 80px));
+  margin: 0;
+  padding: 6px 12px;
+  border: var(--line-faint);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+.route-status.warn { border-color: var(--ink); background: var(--primary-soft); color: var(--ink); }
 .style-btn .swatch { display: inline-flex; }
 .style-btn .swatch i { width: 10px; height: 10px; border: 1.5px solid var(--ink); border-radius: 50%; margin-left: -3px; }
 .style-btn .swatch i:first-child { margin-left: 0; }
@@ -1044,6 +1079,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .map-wrap { order: -1; flex: none; height: 40%; }
   #map { inset: 10px 16px 8px; }
   .map-tools { top: 20px; right: 26px; }
+  .route-status { top: 58px; right: 26px; }
   .map-controls { right: 26px; bottom: 18px; gap: 6px; }
   .map-controls button { width: 34px; height: 34px; }
   .sidebar { width: 100%; height: auto; flex: 1; min-height: 0; }
