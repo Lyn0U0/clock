@@ -90,6 +90,8 @@ const ui = {
   focusExpenseId: null,     // 下次重繪後要聚焦金額欄的支出
   settleOpen: false,        // 結算面板是否開啟
   lastLiveRefs: new Set(),  // 上次重繪時存在的卡片 ref，用來判斷哪些卡片被刪掉
+  spotMenuId: null,         // 開著「⋯」操作選單的景點
+  legModesKey: null,        // 開著交通方式切換的路段（fromId->toId）
   renderOnBlur: false       // 打字中收到雲端更新時，等離開輸入框再重繪
 };
 
@@ -724,6 +726,9 @@ function computeTransfers(rows) {
 
 const ICONS = {
   up: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+  more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+  chevronLeft: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>',
+  chevronRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
   note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
@@ -747,6 +752,7 @@ function render() {
   renderMembers();
   renderSyncBar();
   renderTabs();
+  updateTabsFade();
   renderDayList();
   renderSettleButton();
   renderSettlement();
@@ -815,6 +821,21 @@ function renderTabs() {
   document.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
+// 分頁超出寬度時，在有更多內容的那一側顯示漸層遮罩與捲動箭頭
+function updateTabsFade() {
+  const tabs = document.getElementById('tabs');
+  const bar = tabs.closest('.tabs-scroll');
+  const left = tabs.scrollLeft > 4;
+  const right = tabs.scrollLeft + tabs.clientWidth < tabs.scrollWidth - 4;
+  bar.classList.toggle('fade-left', left);
+  bar.classList.toggle('fade-right', right);
+}
+
+function scrollTabs(direction) {
+  const tabs = document.getElementById('tabs');
+  tabs.scrollBy({ left: direction * tabs.clientWidth * 0.7, behavior: 'smooth' });
+}
+
 function renderDayList() {
   const canRemoveDay = state.days.length > 1;
   document.getElementById('day-list').innerHTML = getVisibleDays().map(day => {
@@ -852,11 +873,13 @@ function renderDaySpots(day) {
 function renderSpotCard(spot, index, total) {
   const expanded = ui.expandedNotes.has(spot.id);
   const hasNote = Boolean(spot.note.trim());
+  const menuOpen = ui.spotMenuId === spot.id;
   const subline = hasNote && !expanded
-    ? `<div class="spot-note-preview">${escapeHtml(spot.note.split('\n')[0])}</div>`
-    : `<div class="spot-coord">${spot.lat.toFixed(4)}, ${spot.lng.toFixed(4)}</div>`;
+    ? `<span class="spot-note-preview">${escapeHtml(spot.note.split('\n')[0])}</span>`
+    : '';
+  const ref = getSpotRef(spot);
   return `
-    <li class="spot" data-spot-id="${spot.id}">
+    <li class="spot ${menuOpen ? 'menu-open' : ''}" data-spot-id="${spot.id}">
       <div class="spot-main">
         <span class="drag-handle" title="拖曳調整順序">${ICONS.grip}</span>
         <span class="spot-index">${index + 1}</span>
@@ -864,20 +887,23 @@ function renderSpotCard(spot, index, total) {
           <span class="spot-name">${escapeHtml(spot.name)}</span>
           ${subline}
         </button>
-        <div class="spot-actions">
-          <button class="icon-btn" data-action="move-up" title="上移" aria-label="上移" ${index === 0 ? 'disabled' : ''}>${ICONS.up}</button>
-          <button class="icon-btn" data-action="move-down" title="下移" aria-label="下移" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}</button>
-          <button class="icon-btn ${hasNote ? 'has-note' : ''} ${expanded ? 'on' : ''}" data-action="toggle-note"
-            title="備註" aria-label="備註" aria-expanded="${expanded}">${ICONS.note}</button>
-          <button class="icon-btn danger" data-action="remove-spot" title="刪除" aria-label="刪除">${ICONS.trash}</button>
-        </div>
+        ${renderExpenseBadge(ref, spot.name)}
+        <button class="icon-btn spot-more ${menuOpen ? 'on' : ''}" data-action="toggle-spot-menu"
+          title="更多操作" aria-label="${escapeHtml(spot.name)} 的更多操作" aria-haspopup="menu" aria-expanded="${menuOpen}">${ICONS.more}</button>
+        ${menuOpen ? `
+          <div class="menu spot-menu" role="menu">
+            <button role="menuitem" data-action="toggle-note">${ICONS.note}${hasNote || expanded ? '編輯備註' : '新增備註'}</button>
+            <button role="menuitem" data-action="move-up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}往前移</button>
+            <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
+            <button role="menuitem" class="danger" data-action="remove-spot">${ICONS.trash}刪除景點</button>
+          </div>` : ''}
       </div>
       ${expanded ? `
         <div class="spot-note">
           <textarea data-spot-id="${spot.id}" rows="3" maxlength="500"
             placeholder="門票預約時間、必吃美食、隨手筆記…">${escapeHtml(spot.note)}</textarea>
         </div>` : ''}
-      ${renderExpenseArea(getSpotRef(spot), spot.name)}
+      ${renderExpensePanel(ref, spot.name)}
     </li>`;
 }
 
@@ -888,41 +914,44 @@ function renderDayTravel(day) {
 
 // 兩個景點之間的路線卡片
 function renderLegSlot(fromSpot, toSpot) {
+  const ref = getLegRef(fromSpot, toSpot);
   return `<li class="leg" data-from="${fromSpot.id}" data-to="${toSpot.id}">
-      <div class="leg-card">
-        <div class="leg-route">${renderLegContent(fromSpot, toSpot)}</div>
-        ${renderExpenseArea(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
-      </div>
+      <div class="leg-node">${renderLegContent(fromSpot, toSpot)}</div>
+      ${renderExpensePanel(ref, `${fromSpot.name} → ${toSpot.name}`)}
     </li>`;
 }
 
 function renderLegContent(fromSpot, toSpot) {
   const mode = getLegMode(fromSpot, toSpot);
+  const key = getPairKey(fromSpot, toSpot);
+  const modesOpen = ui.legModesKey === key;
   const leg = apiKey ? legCache.get(getLegKey(fromSpot, toSpot, mode.value)) : null;
-  let body;
+  let info;
   if (!apiKey) {
-    body = `<div class="leg-sub">設定 Google Maps 金鑰後顯示交通時間</div>`;
+    info = `<span class="leg-info muted">設定地圖金鑰後顯示交通時間</span>`;
   } else if (!leg || leg.status === 'loading') {
-    body = `<div class="leg-sub">計算${mode.label}時間…</div>`;
+    info = `<span class="leg-info muted">計算中…</span>`;
   } else if (leg.status === 'error') {
-    body = `<div class="leg-sub error" title="${escapeHtml(leg.detail || '')}">${escapeHtml(leg.message)}
-        <button class="leg-retry" data-action="retry-leg">重試</button></div>`;
+    info = `<span class="leg-info error" title="${escapeHtml(leg.detail || leg.message)}">${escapeHtml(leg.message)}</span>
+      <button class="link-btn" data-action="retry-leg">重試</button>`;
   } else {
-    const via = leg.description ? `・經 ${escapeHtml(leg.description)}` : '';
-    body = `<div class="leg-time">${formatDuration(leg.durationSec)}</div>
-      <div class="leg-sub">${mode.label}・${formatDistance(leg.distanceMeters)}${via}</div>`;
+    const via = leg.description ? `，經 ${leg.description}` : '';
+    info = `<span class="leg-info" title="${escapeHtml(`${mode.label} ${formatDuration(leg.durationSec)}，${formatDistance(leg.distanceMeters)}${via}`)}">
+        <strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span></span>`;
   }
   const modeButtons = TRAVEL_MODES.map(m => `
-      <button class="leg-mode ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
-        title="這段改用${m.label}" aria-label="${m.label}" aria-pressed="${m.value === mode.value}">${ICONS[m.value]}</button>`).join('');
+      <button class="seg-btn ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
+        aria-pressed="${m.value === mode.value}" title="${m.label}">${ICONS[m.value]}<span>${m.label}</span></button>`).join('');
   return `
-    <div class="leg-head">
-      <span class="leg-icon">${ICONS[mode.value]}</span>
-      <div class="leg-body">${body}</div>
-      <a class="leg-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener"
-        title="在 Google 地圖查看這段路線">Google 地圖${ICONS.external}</a>
+    <div class="leg-row">
+      <button class="leg-mode-btn ${modesOpen ? 'on' : ''}" data-action="toggle-leg-modes" aria-expanded="${modesOpen}"
+        title="交通方式：${mode.label}（點一下切換）" aria-label="交通方式：${mode.label}，點一下切換">${ICONS[mode.value]}</button>
+      ${info}
+      ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
+      <a class="icon-btn leg-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener"
+        title="在 Google 地圖查看路線" aria-label="在 Google 地圖查看路線">${ICONS.external}</a>
     </div>
-    <div class="leg-modes" role="group" aria-label="這段的交通方式">${modeButtons}</div>`;
+    ${modesOpen ? `<div class="segmented leg-modes" role="group" aria-label="這段的交通方式">${modeButtons}</div>` : ''}`;
 }
 
 // 只更新交通欄位與每天的交通總時間，不動景點卡片
@@ -930,7 +959,7 @@ function updateLegViews() {
   dayListEl.querySelectorAll('.leg').forEach(el => {
     const from = findSpot(el.dataset.from)?.spot;
     const to = findSpot(el.dataset.to)?.spot;
-    if (from && to) el.querySelector('.leg-route').innerHTML = renderLegContent(from, to);
+    if (from && to) el.querySelector('.leg-node').innerHTML = renderLegContent(from, to);
   });
   dayListEl.querySelectorAll('.day-travel').forEach(el => {
     const day = getDay(el.dataset.dayId);
@@ -940,27 +969,32 @@ function updateLegViews() {
 
 /* ---------- 記帳區（景點卡與交通卡共用） ---------- */
 
+// 卡片上的記帳小標籤：沒記帳顯示「+ 記帳」，有記帳顯示「已記 NT$ 150」；點一下開合記帳面板
 // title：新增支出時預設帶入的項目名稱
-function renderExpenseArea(ref, title) {
+function renderExpenseBadge(ref, title) {
   const expanded = ui.expandedExpenses.has(ref);
-  const items = getExpensesFor(ref);
-  return `
-    <div class="expenses ${expanded ? 'open' : ''}" data-ref="${escapeHtml(ref)}" data-title="${escapeHtml(title)}">
-      <button class="expense-toggle ${items.some(x => x.amount > 0) ? 'has' : ''}" data-action="toggle-expenses"
-        aria-expanded="${expanded}">${renderExpenseToggle(ref)}</button>
-      ${expanded ? `
-        <div class="expense-list">
-          ${items.map(renderExpenseRow).join('')}
-          <button class="btn-text expense-add" data-action="add-expense">+ 再記一筆</button>
-        </div>` : ''}
-    </div>`;
+  const has = getExpensesFor(ref).some(x => x.amount > 0);
+  return `<button class="expense-badge ${has ? 'has' : ''} ${expanded ? 'on' : ''}" data-action="toggle-expenses"
+      data-ref="${escapeHtml(ref)}" data-title="${escapeHtml(title)}" aria-expanded="${expanded}">${renderExpenseBadgeText(ref)}</button>`;
 }
 
-function renderExpenseToggle(ref) {
+function renderExpenseBadgeText(ref) {
   const items = getExpensesFor(ref).filter(x => x.amount > 0);
-  if (!items.length) return ui.expandedExpenses.has(ref) ? '收合記帳' : '+ 記錄花費';
-  return `${ICONS.wallet}<span class="expense-total">${formatMoney(sumAmounts(items))}</span>`
-    + `<span class="expense-meta">${items.length} 筆</span>`;
+  if (!items.length) return ui.expandedExpenses.has(ref) ? '收合' : '+ 記帳';
+  const count = items.length > 1 ? `<span class="expense-meta">${items.length} 筆</span>` : '';
+  return `已記 <strong>${formatMoney(sumAmounts(items))}</strong>${count}`;
+}
+
+function renderExpensePanel(ref, title) {
+  if (!ui.expandedExpenses.has(ref)) return '';
+  return `
+    <div class="expense-panel" data-ref="${escapeHtml(ref)}" data-title="${escapeHtml(title)}">
+      ${getExpensesFor(ref).map(renderExpenseRow).join('')}
+      <div class="expense-panel-foot">
+        <button class="link-btn" data-action="add-expense">+ 再記一筆</button>
+        <button class="link-btn" data-action="toggle-expenses" data-ref="${escapeHtml(ref)}" data-title="${escapeHtml(title)}">完成</button>
+      </div>
+    </div>`;
 }
 
 function renderExpenseRow(x) {
@@ -973,18 +1007,14 @@ function renderExpenseRow(x) {
   return `
     <div class="expense" data-expense-id="${x.id}">
       <div class="expense-line">
-        <span class="expense-label">項目</span>
-        <input class="expense-title" type="text" data-field="title" value="${escapeHtml(x.title)}"
+        <input class="field expense-title" type="text" data-field="title" value="${escapeHtml(x.title)}"
           placeholder="支出項目" maxlength="40" aria-label="支出項目">
-        <button class="icon-btn danger" data-action="remove-expense" title="刪除此筆支出" aria-label="刪除此筆支出">${ICONS.trash}</button>
-      </div>
-      <div class="expense-line">
-        <span class="expense-label">金額</span>
-        <label class="expense-amount">
+        <label class="field expense-amount">
           <span>NT$</span>
           <input type="number" data-field="amount" value="${x.amount > 0 ? x.amount : ''}" placeholder="0"
             min="0" step="1" inputmode="numeric" aria-label="金額">
         </label>
+        <button class="icon-btn danger" data-action="remove-expense" title="刪除此筆支出" aria-label="刪除此筆支出">${ICONS.trash}</button>
       </div>
       <div class="expense-line expense-options">
         <span class="expense-label">付款</span><div class="pills">${payers}</div>
@@ -1024,11 +1054,10 @@ function renderSettleButton() {
 // 金額、付款人、名稱變動時呼叫：只更新金額相關的顯示，不動輸入框
 function refreshMoneyViews() {
   renderSettleButton();
-  document.querySelectorAll('.expenses[data-ref]').forEach(el => {
+  document.querySelectorAll('.expense-badge[data-ref]').forEach(el => {
     const ref = el.dataset.ref;
-    const toggle = el.querySelector('.expense-toggle');
-    toggle.innerHTML = renderExpenseToggle(ref);
-    toggle.classList.toggle('has', getExpensesFor(ref).some(x => x.amount > 0));
+    el.innerHTML = renderExpenseBadgeText(ref);
+    el.classList.toggle('has', getExpensesFor(ref).some(x => x.amount > 0));
   });
   renderSettlement();
 }
@@ -1131,6 +1160,14 @@ function onActionClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
   const spotId = btn.closest('.spot')?.dataset.spotId;
+  const fromSpotMenu = Boolean(btn.closest('.spot-menu'));
+  if (fromSpotMenu) ui.spotMenuId = null; // 選了選單項目就收起選單
+  handleAction(btn, spotId);
+  // 操作被取消（例如確認視窗按了取消）時畫面沒有重繪，選單仍在，這裡補一次重繪收起選單
+  if (fromSpotMenu && document.querySelector('.spot-menu')) render();
+}
+
+function handleAction(btn, spotId) {
   switch (btn.dataset.action) {
     case 'select-day':
       setActiveDay(btn.dataset.dayId);
@@ -1145,16 +1182,32 @@ function onActionClick(e) {
     case 'focus-spot': focusSpotOnMap(spotId); break;
     case 'set-leg-mode': {
       const leg = btn.closest('.leg');
+      ui.legModesKey = null;
       setLegMode(leg.dataset.from, leg.dataset.to, btn.dataset.mode);
       break;
     }
-    case 'toggle-expenses':
+    case 'toggle-expenses': toggleExpenses(btn.dataset.ref, btn.dataset.title); break;
     case 'add-expense': {
-      const area = btn.closest('.expenses');
-      if (btn.dataset.action === 'add-expense') addExpense(area.dataset.ref, area.dataset.title);
-      else toggleExpenses(area.dataset.ref, area.dataset.title);
+      const panel = btn.closest('.expense-panel');
+      addExpense(panel.dataset.ref, panel.dataset.title);
       break;
     }
+    case 'toggle-spot-menu':
+      ui.spotMenuId = ui.spotMenuId === spotId ? null : spotId;
+      render();
+      document.querySelector('.spot-menu [role="menuitem"]:not(:disabled)')?.focus();
+      break;
+    case 'toggle-leg-modes': {
+      const leg = btn.closest('.leg');
+      const key = `${leg.dataset.from}->${leg.dataset.to}`;
+      ui.legModesKey = ui.legModesKey === key ? null : key;
+      updateLegViews();
+      break;
+    }
+    case 'tabs-prev': scrollTabs(-1); break;
+    case 'tabs-next': scrollTabs(1); break;
+    case 'open-key-settings': closeNavMenu(); showSetup('', { cancelable: Boolean(map) }); break;
+    case 'toggle-nav-menu': toggleNavMenu(); break;
     case 'remove-expense': removeExpense(btn.closest('.expense').dataset.expenseId); break;
     case 'add-member': addMember(); break;
     case 'remove-member': removeMember(btn.dataset.memberId); break;
@@ -1172,6 +1225,44 @@ function onActionClick(e) {
 
 document.querySelector('.sidebar').addEventListener('click', onActionClick);
 document.querySelector('.topbar').addEventListener('click', onActionClick);
+document.getElementById('tabs').addEventListener('scroll', updateTabsFade, { passive: true });
+window.addEventListener('resize', updateTabsFade);
+
+// 點選單以外的地方或按 Esc：收起景點操作選單、導覽列設定選單
+document.addEventListener('click', e => {
+  if (ui.spotMenuId && !e.target.closest('.spot-menu, [data-action="toggle-spot-menu"]')) {
+    ui.spotMenuId = null;
+    render();
+  }
+  if (!e.target.closest('#nav-menu, [data-action="toggle-nav-menu"]')) closeNavMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (ui.spotMenuId) {
+    const id = ui.spotMenuId;
+    ui.spotMenuId = null;
+    render();
+    document.querySelector(`.spot[data-spot-id="${id}"] .spot-more`)?.focus();
+  }
+  closeNavMenu();
+  if (addCard.el && !addCard.el.hidden) closeAddCard();
+});
+
+// ---------- 導覽列設定選單（地圖金鑰等） ----------
+function toggleNavMenu() {
+  const menu = document.getElementById('nav-menu');
+  const open = menu.hidden;
+  menu.hidden = !open;
+  document.getElementById('nav-menu-btn').setAttribute('aria-expanded', String(open));
+  if (open) menu.querySelector('[role="menuitem"]')?.focus();
+}
+
+function closeNavMenu() {
+  const menu = document.getElementById('nav-menu');
+  if (menu.hidden) return;
+  menu.hidden = true;
+  document.getElementById('nav-menu-btn').setAttribute('aria-expanded', 'false');
+}
 
 dayListEl.addEventListener('input', e => {
   if (e.target.matches('textarea[data-spot-id]')) {
@@ -1289,7 +1380,7 @@ function endDrag() {
  * 8. 地圖（Google Maps）
  * ========================================================================== */
 
-let map, infoWindow, HtmlMarker, Place, AutocompleteSuggestion, AutocompleteSessionToken;
+let map, HtmlMarker, Place, AutocompleteSuggestion, AutocompleteSessionToken;
 const apiKey = getApiKey();
 const markers = new Map(); // spotId -> HtmlMarker
 
@@ -1323,10 +1414,6 @@ function showSetup(error, { cancelable = false } = {}) {
 function hideSetup() {
   document.getElementById('setup').hidden = true;
 }
-
-document.getElementById('key-btn').addEventListener('click', () => {
-  showSetup('', { cancelable: Boolean(map) });
-});
 
 document.getElementById('setup-cancel').addEventListener('click', hideSetup);
 
@@ -1377,7 +1464,7 @@ function loadGoogleMaps(key) {
 }
 
 async function initMap() {
-  const { Map: GoogleMap, InfoWindow, OverlayView } = await google.maps.importLibrary('maps');
+  const { Map: GoogleMap, OverlayView } = await google.maps.importLibrary('maps');
   HtmlMarker = createHtmlMarkerClass(OverlayView);
   try {
     ({ Place, AutocompleteSuggestion, AutocompleteSessionToken } = await google.maps.importLibrary('places'));
@@ -1390,12 +1477,9 @@ async function initMap() {
     zoom: 13,
     styles: isNeoMapStyle() ? NEO_MAP_STYLE : null,
     clickableIcons: true,
-    mapTypeControl: false,
-    streetViewControl: false,
-    fullscreenControl: false,
+    disableDefaultUI: true, // 縮放與全螢幕改用自訂的控制項（右下角）
     gestureHandling: 'greedy'
   });
-  infoWindow = new InfoWindow();
 
   // 點擊地圖 → 在點擊處彈出新增表單
   map.addListener('click', e => {
@@ -1406,6 +1490,7 @@ async function initMap() {
 
   setupPlaceSearch();
   renderStyleButton();
+  document.getElementById('map-controls').hidden = false;
   render();
   fitMapToSpots(getVisibleDays().flatMap(d => d.spots));
 }
@@ -1474,6 +1559,7 @@ function createHtmlMarkerClass(OverlayView) {
     }
     set content(node) { this.el.replaceChildren(node); }
     set title(text) { this.el.title = text; }
+    getEl() { return this.el; }
     set zIndex(z) { this.el.style.zIndex = z; }
   };
 }
@@ -1487,54 +1573,107 @@ function getDefaultDayId() {
 
 // name：已知地點名稱時（例如從搜尋選取）直接帶入
 function openAddSpotForm(latLng, placeId, name) {
-  const lat = latLng.lat();
-  const lng = latLng.lng();
-  const defaultDayId = getDefaultDayId();
-  const form = document.createElement('form');
-  form.className = 'add-form';
-  form.innerHTML = `
-    <h3>新增景點</h3>
-    <div class="coord">${lat.toFixed(5)}, ${lng.toFixed(5)}</div>
-    <label>景點名稱
-      <input name="name" type="text" placeholder="例如：台北 101" maxlength="40" autocomplete="off">
-    </label>
-    <label>加入哪一天
-      <select name="day">
-        ${state.days.map((d, i) => `<option value="${d.id}" ${d.id === defaultDayId ? 'selected' : ''}>${getDayLabel(i)}${getDayDateText(i) ? `・${getDayDateText(i)}` : ''}（${d.spots.length} 個景點）</option>`).join('')}
-      </select>
-    </label>
-    <button type="submit" class="btn-primary">加入行程</button>
-  `;
-  const input = form.elements.name;
-  form.addEventListener('submit', ev => {
-    ev.preventDefault();
-    const name = input.value.trim();
-    if (!name) {
-      input.classList.add('invalid');
-      input.focus();
-      return;
-    }
-    addSpot(form.elements.day.value, { name, lat, lng, placeId });
-    infoWindow.close();
-  });
-  input.addEventListener('input', () => input.classList.remove('invalid'));
+  const lat = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
+  const lng = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
+  addCard.draft = { lat, lng, placeId: placeId || null };
+  const { el } = addCard;
+  const input = el.elements.name;
+  input.value = name || '';
+  input.classList.remove('invalid');
+  document.getElementById('add-card-where').textContent = name ? '從搜尋結果加入' : `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
 
-  infoWindow.setContent(form);
-  infoWindow.setPosition(latLng);
-  infoWindow.open({ map });
-  google.maps.event.addListenerOnce(infoWindow, 'domready', () => input.focus());
-  if (name) input.value = name;
+  // 天數選單：顯示日期與景點數，左側色點跟著選到的那天
+  const select = el.elements.day;
+  const defaultDayId = getDefaultDayId();
+  select.innerHTML = state.days.map((d, i) => `<option value="${d.id}" ${d.id === defaultDayId ? 'selected' : ''}>
+      ${getDayLabel(i)}${getDayDateText(i) ? `・${getDayDateText(i)}` : ''}（${d.spots.length} 個景點）</option>`).join('');
+  updateAddCardSwatch();
+
+  // 地圖上用虛線圓圈標出要加入的位置
+  if (!addCard.marker) {
+    const pin = document.createElement('div');
+    pin.className = 'draft-pin';
+    addCard.marker = new HtmlMarker({ map, position: { lat, lng } });
+    addCard.marker.content = pin;
+    addCard.marker.zIndex = 50;
+  } else {
+    addCard.marker.position = { lat, lng };
+    addCard.marker.setMap(map);
+  }
+  addCard.marker.draw?.();
+
+  el.hidden = false;
+  input.focus();
+  keepDraftVisible();
 
   // 點到 Google 地圖上的地點時，自動帶入地點名稱
   if (placeId && Place && !name) {
+    const draft = addCard.draft;
     new Place({ id: placeId, requestedLanguage: 'zh-TW' })
       .fetchFields({ fields: ['displayName'] })
       .then(({ place }) => {
-        if (!input.value && place.displayName) input.value = place.displayName;
+        if (addCard.draft === draft && !input.value && place.displayName) input.value = place.displayName;
       })
       .catch(() => {});
   }
 }
+
+// 新增卡片固定在地圖下方；點的位置被卡片擋住時，把地圖往上推
+function keepDraftVisible() {
+  requestAnimationFrame(() => {
+    const pin = addCard.marker?.el?.firstElementChild?.getBoundingClientRect();
+    const card = addCard.el.getBoundingClientRect();
+    if (!pin || !card.height) return;
+    const overlap = pin.bottom + 24 - card.top;
+    if (overlap > 0 && pin.left < card.right && pin.right > card.left) map.panBy(0, overlap);
+  });
+}
+
+function updateAddCardSwatch() {
+  const index = getDayIndex(addCard.el.elements.day.value);
+  addCard.el.querySelector('.day-swatch').style.background = getDayColor(Math.max(0, index));
+}
+
+function closeAddCard() {
+  addCard.el.hidden = true;
+  addCard.draft = null;
+  addCard.marker?.setMap(null);
+}
+
+const addCard = { el: document.getElementById('add-card'), draft: null, marker: null };
+
+addCard.el.addEventListener('submit', e => {
+  e.preventDefault();
+  const input = addCard.el.elements.name;
+  const name = input.value.trim();
+  if (!name || !addCard.draft) {
+    input.classList.add('invalid');
+    input.focus();
+    return;
+  }
+  const { lat, lng, placeId } = addCard.draft;
+  closeAddCard();
+  addSpot(addCard.el.elements.day.value, { name, lat, lng, placeId });
+});
+addCard.el.elements.name.addEventListener('input', e => e.target.classList.remove('invalid'));
+addCard.el.elements.day.addEventListener('change', updateAddCardSwatch);
+document.getElementById('add-card-close').addEventListener('click', closeAddCard);
+
+// ---------- 地圖控制項（縮放、全螢幕） ----------
+document.getElementById('map-controls').addEventListener('click', e => {
+  const btn = e.target.closest('[data-map]');
+  if (!btn || !map) return;
+  if (btn.dataset.map === 'zoom-in') map.setZoom(map.getZoom() + 1);
+  if (btn.dataset.map === 'zoom-out') map.setZoom(map.getZoom() - 1);
+  if (btn.dataset.map === 'fullscreen') {
+    const wrap = document.querySelector('.map-wrap');
+    const request = document.fullscreenElement ? document.exitFullscreen() : wrap.requestFullscreen?.();
+    Promise.resolve(request).catch(() => {}); // 有些內嵌環境不允許全螢幕
+  }
+});
+document.addEventListener('fullscreenchange', () => {
+  document.querySelector('[data-map="fullscreen"]').setAttribute('aria-pressed', String(Boolean(document.fullscreenElement)));
+});
 
 /* ---------- 搜尋地點（Places API (New) Autocomplete） ----------
  * 輸入時列出建議地點；選取後地圖移到該處，並打開已填好名稱的新增表單。
@@ -1543,6 +1682,43 @@ function openAddSpotForm(latLng, placeId, name) {
 const searchInput = document.getElementById('place-search');
 const searchResults = document.getElementById('search-results');
 const search = { token: null, timer: null, seq: 0, items: [], active: -1 };
+const RECENT_SEARCH_STORAGE = 'trip-planner-recent-places';
+const POPULAR_QUERIES = ['台北 101', '故宮', '西門町', '士林夜市', '九份', '陽明山'];
+
+function loadRecentPlaces() {
+  try {
+    const list = JSON.parse(localStorage.getItem(RECENT_SEARCH_STORAGE));
+    return Array.isArray(list) ? list.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberPlace(place) {
+  const list = [place, ...loadRecentPlaces().filter(p => p.id !== place.id)].slice(0, 5);
+  try {
+    localStorage.setItem(RECENT_SEARCH_STORAGE, JSON.stringify(list));
+  } catch {}
+}
+
+// 搜尋框是空的時：顯示最近搜尋與熱門景點
+function renderSearchHome() {
+  const recent = loadRecentPlaces();
+  search.items = [];
+  search.active = -1;
+  searchResults.innerHTML = `
+    ${recent.length ? `<li class="search-section" role="presentation">最近搜尋</li>
+      ${recent.map((p, i) => `
+        <li class="search-item" data-recent="${i}" role="option" aria-selected="false">
+          <span class="search-main">${escapeHtml(p.name)}</span>
+          <span class="search-secondary">${escapeHtml(p.area || '')}</span>
+        </li>`).join('')}` : ''}
+    <li class="search-section" role="presentation">熱門景點</li>
+    <li class="search-chips" role="presentation">
+      ${POPULAR_QUERIES.map(q => `<button type="button" class="chip" data-query="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')}
+    </li>`;
+  showSearchResults();
+}
 
 function setupPlaceSearch() {
   if (!AutocompleteSuggestion) {
@@ -1556,7 +1732,8 @@ function setupPlaceSearch() {
   });
   searchInput.addEventListener('keydown', onSearchKeydown);
   searchInput.addEventListener('focus', () => {
-    if (search.items.length) showSearchResults();
+    if (!searchInput.value.trim()) renderSearchHome();
+    else if (search.items.length) showSearchResults();
   });
   searchInput.addEventListener('blur', hideSearchResults);
   // 點選建議時不要讓輸入框先失焦（失焦會關閉清單）
@@ -1564,6 +1741,13 @@ function setupPlaceSearch() {
   searchResults.addEventListener('click', e => {
     const item = e.target.closest('[data-index]');
     if (item) selectSuggestion(Number(item.dataset.index));
+    const recent = e.target.closest('[data-recent]');
+    if (recent) selectRecentPlace(loadRecentPlaces()[Number(recent.dataset.recent)]);
+    const chip = e.target.closest('[data-query]');
+    if (chip) {
+      searchInput.value = chip.dataset.query;
+      runPlaceSearch();
+    }
   });
 }
 
@@ -1571,8 +1755,7 @@ async function runPlaceSearch() {
   const text = searchInput.value.trim();
   const seq = ++search.seq; // 只採用最後一次輸入的結果
   if (!text) {
-    search.items = [];
-    hideSearchResults();
+    renderSearchHome();
     return;
   }
   search.token = search.token || new AutocompleteSessionToken();
@@ -1656,7 +1839,27 @@ async function selectSuggestion(index) {
     map.panTo(place.location);
     map.setZoom(16);
   }
-  openAddSpotForm(place.location, place.id, place.displayName || searchInput.value);
+  const name = place.displayName || searchInput.value;
+  rememberPlace({
+    id: place.id,
+    name,
+    area: prediction.secondaryText?.text || '',
+    lat: place.location.lat(),
+    lng: place.location.lng()
+  });
+  openAddSpotForm(place.location, place.id, name);
+}
+
+// 最近搜尋過的地點已存有座標，不用再呼叫 Places API
+function selectRecentPlace(place) {
+  if (!place) return;
+  hideSearchResults();
+  searchInput.value = place.name;
+  searchInput.blur();
+  map.panTo({ lat: place.lat, lng: place.lng });
+  if (map.getZoom() < 15) map.setZoom(16);
+  rememberPlace(place);
+  openAddSpotForm({ lat: place.lat, lng: place.lng }, place.id, place.name);
 }
 
 function createPinElement(dayIndex, spotIndex, dimmed) {

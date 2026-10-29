@@ -19,6 +19,13 @@
           <input id="trip-name" class="trip-name" type="text" maxlength="30" placeholder="旅遊行程規劃"
             autocomplete="off" aria-label="旅程名稱（點一下可改名）" title="點一下可改名">
         </h1>
+        <div class="trip-sub">
+          <label class="trip-date" title="選擇出發日期">
+            <span>出發</span>
+            <input id="trip-start" type="date" aria-label="出發日期">
+          </label>
+          <span class="countdown" id="countdown" role="status" hidden></span>
+        </div>
       </div>
     </div>
     <div class="search" role="search">
@@ -32,6 +39,22 @@
       <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog">
         <span>💰 旅費結算</span><span class="settle-btn-total" id="settle-total">NT$ 0</span>
       </button>
+      <div class="nav-menu-wrap">
+        <button class="icon-btn nav-btn" id="nav-menu-btn" data-action="toggle-nav-menu" aria-haspopup="menu"
+          aria-expanded="false" aria-label="設定" title="設定">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
+        <div class="menu nav-menu" id="nav-menu" role="menu" hidden>
+          <button role="menuitem" data-action="open-key-settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
+            Google Maps 金鑰
+          </button>
+          <a role="menuitem" href="https://github.com/Lyn0U0/clock/blob/claude/amazing-hopper-a3rihm/trip-planner/README.md" target="_blank" rel="noopener">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
+            設定說明
+          </a>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -39,18 +62,19 @@
     <aside class="sidebar">
       <div class="sidebar-header">
         <div class="summary" id="summary"></div>
-        <div class="trip-plan">
-          <label class="trip-date">
-            <span>出發日</span>
-            <input id="trip-start" type="date" aria-label="出發日期">
-          </label>
-          <span class="countdown" id="countdown" role="status" hidden></span>
-        </div>
-        <p class="hint">點地圖或搜尋加入景點，拖曳或用箭頭調整順序。</p>
+        <p class="hint">點地圖或搜尋加入景點，按住左側把手拖曳調整順序。</p>
         <div class="sync-bar" id="sync-bar"></div>
       </div>
       <div class="tabs-bar">
-        <nav class="tabs" id="tabs" role="tablist" aria-label="切換天數"></nav>
+        <div class="tabs-scroll">
+          <button class="tabs-arrow prev" data-action="tabs-prev" tabindex="-1" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+          </button>
+          <nav class="tabs" id="tabs" role="tablist" aria-label="切換天數"></nav>
+          <button class="tabs-arrow next" data-action="tabs-next" tabindex="-1" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+          </button>
+        </div>
         <button class="tab tab-add" data-action="add-day" title="新增一天">+ Day</button>
       </div>
       <div class="day-list" id="day-list"></div>
@@ -59,12 +83,47 @@
     <main class="map-wrap">
       <div id="map"></div>
       <div class="map-tools">
-        <button class="key-btn style-btn" id="style-btn" type="button" aria-pressed="true" hidden></button>
-        <button class="key-btn" id="key-btn" type="button" title="查看或更換 Google Maps 金鑰">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
-          <span>地圖金鑰</span>
+        <button class="map-chip style-btn" id="style-btn" type="button" aria-pressed="true" hidden></button>
+      </div>
+      <div class="map-controls" id="map-controls" hidden>
+        <button type="button" data-map="zoom-in" aria-label="放大" title="放大">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <button type="button" data-map="zoom-out" aria-label="縮小" title="縮小">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg>
+        </button>
+        <button type="button" data-map="fullscreen" aria-label="全螢幕" title="全螢幕" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
         </button>
       </div>
+      <form class="add-card" id="add-card" aria-labelledby="add-card-title" hidden>
+        <div class="add-card-head">
+          <span class="add-card-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>
+          </span>
+          <div class="add-card-titles">
+            <h3 id="add-card-title">新增景點</h3>
+            <p id="add-card-where"></p>
+          </div>
+          <button type="button" class="icon-btn" id="add-card-close" aria-label="取消" title="取消（Esc）">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+        <label class="add-card-field">
+          <span>景點名稱</span>
+          <input class="field" name="name" type="text" placeholder="例如：台北 101" maxlength="40" autocomplete="off">
+        </label>
+        <div class="add-card-row">
+          <label class="add-card-field">
+            <span>加入哪一天</span>
+            <span class="select-wrap">
+              <span class="day-swatch" aria-hidden="true"></span>
+              <select class="field" name="day"></select>
+            </span>
+          </label>
+          <button type="submit" class="btn-primary">加入行程</button>
+        </div>
+      </form>
       <div class="setup" id="setup" role="dialog" aria-labelledby="setup-title" hidden>
         <div class="setup-card">
           <h2 id="setup-title">設定 Google Maps 金鑰</h2>
