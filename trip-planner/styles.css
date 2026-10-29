@@ -2,7 +2,7 @@
  * 旅遊行程規劃：新野獸派 × 復古貼紙風
  * 版面：頂部導覽列（品牌｜搜尋膠囊｜旅伴＋結算）＋ 左側行程欄 ＋ 右側黑框地圖
  * 規則：所有卡片與按鈕都是純黑實線邊框 + 硬陰影；按下時往右下平移、陰影歸零；
- *       狀態與花費標籤做成微傾斜的手帳貼紙（傾斜角度用 --tilt 控制）；天數分頁保持水平。
+ *       狀態與花費標籤做成微傾斜的手帳貼紙（傾斜角度用 --tilt 控制）；天數分頁與行程清單內保持水平。
  * ========================================================================== */
 :root {
   /* 底色與墨色 */
@@ -492,7 +492,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   border: var(--line);
   border-radius: 10px;
   background: var(--c);
-  transform: rotate(-4deg);
 }
 .leg-icon svg { width: 17px; height: 17px; }
 .leg-body { flex: 1; min-width: 0; }
@@ -539,7 +538,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .expenses { padding: 0 12px 12px 58px; }
 .leg-card .expenses { padding: 0 0 0 42px; }
 .expense-toggle {
-  --tilt: -1.5deg;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -552,7 +550,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .expense-toggle.has { background: var(--yellow); }
 .expense-toggle svg { width: 14px; height: 14px; }
 .expense-total { font-weight: 900; font-variant-numeric: tabular-nums; }
-.expense-meta { --tilt: 4deg; padding: 0 6px; background: var(--paper); font-size: 10px; }
+.expense-meta { padding: 0 6px; background: var(--paper); font-size: 10px; }
 .expense-list { display: flex; flex-direction: column; gap: 10px; margin: 12px 0 0 -46px; }
 .leg-card .expense-list { margin-left: -42px; } /* 展開的表單用滿整張卡片寬度 */
 .expense {
