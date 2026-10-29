@@ -2732,6 +2732,11 @@ async function copyShareLink(btn) {
 
 function renderSyncBar() {
   const el = document.getElementById('sync-bar');
+  // 同步狀態收在設定選單裡；共享行程時在齒輪上加一個狀態點，出問題時一眼看得到
+  const indicator = document.getElementById('sync-indicator');
+  indicator.hidden = !sharedTripId;
+  indicator.className = `sync-indicator ${sync.status}`;
+  document.getElementById('avatar-btn').dataset.sync = sharedTripId ? sync.status : ''; // 手機版顯示在旅伴頭像上
   if (!sharedTripId) {
     el.className = 'sync-bar local';
     el.innerHTML = FIREBASE_CONFIG

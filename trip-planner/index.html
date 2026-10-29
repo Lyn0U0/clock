@@ -48,10 +48,14 @@
         aria-controls="mobile-panel" aria-label="旅伴與設定"></button>
       <div class="nav-menu-wrap">
         <button class="icon-btn nav-btn" id="nav-menu-btn" data-action="toggle-nav-menu" aria-haspopup="menu"
-          aria-expanded="false" aria-label="設定" title="設定">
+          aria-expanded="false" aria-label="設定與雲端同步" title="設定與雲端同步">
+          <span class="sync-indicator" id="sync-indicator" hidden></span>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
         </button>
         <div class="menu nav-menu" id="nav-menu" role="menu" hidden>
+          <p class="menu-label" role="presentation">雲端同步</p>
+          <div class="sync-bar" id="sync-bar"></div>
+          <hr class="menu-sep" role="separator">
           <button role="menuitem" data-action="open-key-settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
             Google Maps 金鑰
@@ -72,7 +76,6 @@
       <div class="sidebar-header">
         <div class="summary" id="summary"></div>
         <p class="hint">點地圖或搜尋加入景點，按住左側把手拖曳調整順序。</p>
-        <div class="sync-bar" id="sync-bar"></div>
       </div>
       <div class="tabs-bar">
         <div class="tabs-scroll">
