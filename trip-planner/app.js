@@ -205,6 +205,11 @@ function getDayDate(dayIndex) {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]) + dayIndex);
 }
 
+function toISODate(date) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 function formatDayDate(date, withWeekday = true) {
   const text = `${date.getMonth() + 1}/${date.getDate()}`;
   return withWeekday ? `${text}（${WEEKDAYS[date.getDay()]}）` : text;
@@ -328,6 +333,31 @@ function removeDay(dayId) {
 function setActiveDay(dayId) {
   if (dayId !== OVERVIEW && !getDay(dayId)) return;
   state.activeDayId = dayId;
+  commit();
+}
+
+// 選回程日：依出發日到回程日的天數增加或減少行程天數（從最後一天開始減）
+function setTripEnd(value) {
+  const start = getDayDate(0);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || '');
+  if (!start || !match) return render();
+  const end = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  const count = Math.round((end - start) / 86400000) + 1;
+  if (count < 1 || count > 60) return render(); // 早於出發日或超過 60 天就還原
+  if (count > state.days.length) {
+    while (state.days.length < count) state.days.push(createDay());
+  } else if (count < state.days.length) {
+    const removed = state.days.slice(count);
+    const spotCount = removed.reduce((sum, d) => sum + d.spots.length, 0);
+    if (spotCount) {
+      const labels = `${getDayLabel(count)}${removed.length > 1 ? ` – ${getDayLabel(state.days.length - 1)}` : ''}`;
+      const ok = confirm(`縮短行程會刪除 ${labels}，以及這幾天的 ${spotCount} 個景點和相關花費，確定嗎？`);
+      if (!ok) return render();
+    }
+    removed.forEach(d => d.spots.forEach(s => ui.expandedNotes.delete(s.id)));
+    state.days = state.days.slice(0, count);
+    if (!getDay(state.activeDayId)) state.activeDayId = OVERVIEW;
+  }
   commit();
 }
 
@@ -777,6 +807,11 @@ function renderTripHeader() {
   const dateInput = document.getElementById('trip-start');
   if (document.activeElement !== nameInput) nameInput.value = state.tripName;
   if (document.activeElement !== dateInput) dateInput.value = state.startDate;
+  // 回程日 = 出發日 + 天數 − 1；沒設出發日時不能選
+  const endInput = document.getElementById('trip-end');
+  endInput.disabled = !state.startDate;
+  endInput.min = state.startDate;
+  if (document.activeElement !== endInput) endInput.value = state.startDate ? toISODate(getDayDate(state.days.length - 1)) : '';
   document.title = state.tripName.trim() || DEFAULT_TRIP_NAME;
   renderCountdown();
 }
@@ -1285,6 +1320,11 @@ tripNameInput.addEventListener('change', () => {
 });
 tripNameInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') tripNameInput.blur();
+});
+document.getElementById('trip-end').addEventListener('change', e => {
+  setTripEnd(e.target.value);
+  // 不論套用或取消，欄位都顯示實際的回程日（重繪時不會覆蓋正在編輯的欄位）
+  e.target.value = state.startDate ? toISODate(getDayDate(state.days.length - 1)) : '';
 });
 document.getElementById('trip-start').addEventListener('change', e => {
   state.startDate = e.target.value;

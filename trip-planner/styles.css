@@ -227,6 +227,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 .trip-date input:hover { background: var(--surface); }
 .trip-date input:focus-visible { box-shadow: var(--ring); }
+.trip-date input:disabled { opacity: .45; cursor: not-allowed; }
+.trip-end:has(input:disabled) { cursor: not-allowed; }
 .countdown { display: inline-flex; align-items: center; gap: 3px; padding-left: 8px; border-left: 1.5px solid var(--edge); font-weight: 700; white-space: nowrap; }
 .countdown strong { color: var(--ink); font-size: 13px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .countdown.today { color: var(--success); }
