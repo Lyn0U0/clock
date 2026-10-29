@@ -671,10 +671,14 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: var(--shadow-card);
   overflow: hidden;
 }
-.key-btn {
+.map-tools {
   position: absolute;
   top: 30px; right: 32px;
   z-index: 500;
+  display: flex;
+  gap: 10px;
+}
+.key-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -685,6 +689,13 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   font-weight: 900;
 }
 .key-btn svg { width: 15px; height: 15px; }
+.style-btn[aria-pressed="true"] { background: var(--yellow); }
+.style-btn .swatch { display: inline-flex; }
+.style-btn .swatch i { width: 10px; height: 10px; border: 1.5px solid var(--ink); border-radius: 50%; margin-left: -3px; }
+.style-btn .swatch i:first-child { margin-left: 0; }
+
+/* 行程圖釘（OverlayView）：尖端對齊座標點 */
+.html-marker { position: absolute; transform: translate(-50%, -100%); }
 
 /* 尚未設定金鑰 / 更換金鑰 */
 .setup {
@@ -903,7 +914,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .app { flex-direction: column; }
   .map-wrap { order: -1; flex: none; height: 40%; }
   #map { inset: 10px 16px 8px; }
-  .key-btn { top: 20px; right: 26px; padding: 7px; font-size: 0; gap: 0; }
+  .map-tools { top: 20px; right: 26px; gap: 8px; }
+  .key-btn { padding: 7px; gap: 0; }
+  .key-btn > span { display: none; }
   .sidebar { width: 100%; height: auto; flex: 1; min-height: 0; }
   .sidebar-header { padding: 10px 16px 0; }
   .hint { display: none; }

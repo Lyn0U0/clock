@@ -6,8 +6,20 @@
 
 // 填入你的 Google Maps API 金鑰（請在 Google Cloud 限制可使用的網站）
 const GOOGLE_MAPS_API_KEY = '';
-// Advanced Marker 需要 Map ID；DEMO_MAP_ID 可用於開發，正式上線請換成自己的 Map ID
-const GOOGLE_MAP_ID = 'DEMO_MAP_ID';
+// 預設地圖配色（新野獸派復古調）；地圖右上角可切換回 Google 原本的樣式。
+// 注意：styles 不能和 mapId 同時使用，所以行程圖釘用 OverlayView 自己畫（見 createHtmlMarkerClass）。
+const NEO_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#FAF6EE' }] },
+  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#FAF6EE' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#BAE6FD' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#D1FAE5' }] },
+  { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#FFFFFF' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#D4D4D8' }] },
+  { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#1E293B' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#FFFFFF' }, { weight: 3 }] }
+];
+const MAP_STYLE_STORAGE = 'trip-planner-map-style'; // 'neo' | 'plain'，只存在這台裝置
 
 // 雲端同步（Firebase Firestore）：到 Firebase 主控台 → 專案設定 → 一般 → 你的應用程式，
 // 複製 firebaseConfig 物件貼在這裡（設定步驟見 README.md）。保持 null 則只存在這台裝置。
@@ -1277,9 +1289,9 @@ function endDrag() {
  * 8. 地圖（Google Maps）
  * ========================================================================== */
 
-let map, infoWindow, AdvancedMarkerElement, Place, AutocompleteSuggestion, AutocompleteSessionToken;
+let map, infoWindow, HtmlMarker, Place, AutocompleteSuggestion, AutocompleteSessionToken;
 const apiKey = getApiKey();
-const markers = new Map(); // spotId -> AdvancedMarkerElement
+const markers = new Map(); // spotId -> HtmlMarker
 
 // 這台瀏覽器填過的金鑰優先，方便自行更換；沒填過才用程式碼裡的 GOOGLE_MAPS_API_KEY
 function getStoredApiKey() {
@@ -1365,8 +1377,8 @@ function loadGoogleMaps(key) {
 }
 
 async function initMap() {
-  const { Map: GoogleMap, InfoWindow } = await google.maps.importLibrary('maps');
-  ({ AdvancedMarkerElement } = await google.maps.importLibrary('marker'));
+  const { Map: GoogleMap, InfoWindow, OverlayView } = await google.maps.importLibrary('maps');
+  HtmlMarker = createHtmlMarkerClass(OverlayView);
   try {
     ({ Place, AutocompleteSuggestion, AutocompleteSessionToken } = await google.maps.importLibrary('places'));
   } catch {
@@ -1376,7 +1388,7 @@ async function initMap() {
   map = new GoogleMap(document.getElementById('map'), {
     center: DEFAULT_CENTER,
     zoom: 13,
-    mapId: GOOGLE_MAP_ID,
+    styles: isNeoMapStyle() ? NEO_MAP_STYLE : null,
     clickableIcons: true,
     mapTypeControl: false,
     streetViewControl: false,
@@ -1393,8 +1405,77 @@ async function initMap() {
   });
 
   setupPlaceSearch();
+  renderStyleButton();
   render();
   fitMapToSpots(getVisibleDays().flatMap(d => d.spots));
+}
+
+// ---------- 地圖配色切換 ----------
+function isNeoMapStyle() {
+  try {
+    return localStorage.getItem(MAP_STYLE_STORAGE) !== 'plain';
+  } catch {
+    return true;
+  }
+}
+
+function setNeoMapStyle(on) {
+  try {
+    localStorage.setItem(MAP_STYLE_STORAGE, on ? 'neo' : 'plain');
+  } catch {}
+  map?.setOptions({ styles: on ? NEO_MAP_STYLE : null });
+  renderStyleButton();
+}
+
+function renderStyleButton() {
+  const btn = document.getElementById('style-btn');
+  const on = isNeoMapStyle();
+  btn.hidden = !map;
+  btn.setAttribute('aria-pressed', String(on));
+  btn.title = on ? '目前是復古配色，點一下改回 Google 原本的地圖樣式' : '目前是 Google 原本的地圖，點一下改用復古配色';
+  btn.innerHTML = `<span class="swatch" aria-hidden="true"><i style="background:#FAF6EE"></i><i style="background:#BAE6FD"></i><i style="background:#D1FAE5"></i></span>`
+    + `<span>${on ? '復古配色' : '原始地圖'}</span>`;
+}
+
+document.getElementById('style-btn').addEventListener('click', () => setNeoMapStyle(!isNeoMapStyle()));
+
+// 用 OverlayView 畫的 HTML 圖釘，介面與 AdvancedMarkerElement 相近（content、title、zIndex、gmp-click），
+// 但不需要 mapId，因此可以和 styles 自訂配色一起使用
+function createHtmlMarkerClass(OverlayView) {
+  return class HtmlMarker extends OverlayView {
+    constructor({ map: targetMap, position }) {
+      super();
+      this.position = position;
+      this.listeners = [];
+      this.el = document.createElement('div');
+      this.el.className = 'html-marker';
+      this.el.addEventListener('click', e => {
+        e.stopPropagation();
+        this.listeners.forEach(fn => fn());
+      });
+      OverlayView.preventMapHitsAndGesturesFrom(this.el); // 點圖釘不會觸發地圖的新增表單
+      this.setMap(targetMap);
+    }
+    addListener(name, fn) {
+      if (name === 'gmp-click') this.listeners.push(fn);
+    }
+    onAdd() {
+      this.getPanes().overlayMouseTarget.append(this.el);
+    }
+    draw() {
+      const latLng = google.maps.LatLng ? new google.maps.LatLng(this.position) : this.position;
+      const point = this.getProjection().fromLatLngToDivPixel(latLng);
+      if (!point) return;
+      this.el.style.left = `${point.x}px`;
+      this.el.style.top = `${point.y}px`;
+    }
+    onRemove() {
+      this.el.remove();
+    }
+    set content(node) { this.el.replaceChildren(node); }
+    set title(text) { this.el.title = text; }
+    set zIndex(z) { this.el.style.zIndex = z; }
+  };
 }
 
 // 新增表單預設選取：目前分頁的那天 → 上次選的那天 → Day 1
@@ -1603,7 +1684,7 @@ function syncMarkers() {
       liveIds.add(spot.id);
       let marker = markers.get(spot.id);
       if (!marker) {
-        marker = new AdvancedMarkerElement({ map, position: { lat: spot.lat, lng: spot.lng } });
+        marker = new HtmlMarker({ map, position: { lat: spot.lat, lng: spot.lng } });
         marker.addListener('gmp-click', () => onMarkerClick(spot.id));
         markers.set(spot.id, marker);
       }
@@ -1614,7 +1695,7 @@ function syncMarkers() {
   });
   for (const [id, marker] of markers) {
     if (!liveIds.has(id)) {
-      marker.map = null;
+      marker.setMap(null);
       markers.delete(id);
     }
   }
