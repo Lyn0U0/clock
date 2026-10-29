@@ -92,6 +92,7 @@ const ui = {
   lastLiveRefs: new Set(),  // 上次重繪時存在的卡片 ref，用來判斷哪些卡片被刪掉
   spotMenuId: null,         // 開著「⋯」操作選單的景點
   legModesKey: null,        // 開著交通方式切換的路段（fromId->toId）
+  swipeSpotId: null,        // 手機上向左滑開操作按鈕的景點
   renderOnBlur: false       // 打字中收到雲端更新時，等離開輸入框再重繪
 };
 
@@ -787,6 +788,8 @@ function render() {
   renderDayList();
   renderSettleButton();
   renderSettlement();
+  renderNextStop();
+  layoutSheet(false);
   if (map) {
     syncMarkers();
     scheduleDayRoute();
@@ -918,7 +921,12 @@ function renderSpotCard(spot, index, total) {
     : '';
   const ref = getSpotRef(spot);
   return `
-    <li class="spot ${menuOpen ? 'menu-open' : ''}" data-spot-id="${spot.id}">
+    <li class="spot ${menuOpen ? 'menu-open' : ''} ${ui.swipeSpotId === spot.id ? 'swiped' : ''}" data-spot-id="${spot.id}">
+      <div class="spot-row">
+      <div class="swipe-actions" aria-hidden="${ui.swipeSpotId !== spot.id}">
+        <button data-action="open-spot-edit" tabindex="-1">${ICONS.note}編輯</button>
+        <button class="danger" data-action="remove-spot" tabindex="-1">${ICONS.trash}刪除</button>
+      </div>
       <div class="spot-main">
         <span class="drag-handle" title="拖曳調整順序">${ICONS.grip}</span>
         <span class="spot-index">${index + 1}</span>
@@ -929,6 +937,8 @@ function renderSpotCard(spot, index, total) {
         ${renderExpenseBadge(ref, spot.name)}
         <button class="icon-btn spot-more ${menuOpen ? 'on' : ''}" data-action="toggle-spot-menu"
           title="更多操作" aria-label="${escapeHtml(spot.name)} 的更多操作" aria-haspopup="menu" aria-expanded="${menuOpen}">${ICONS.more}</button>
+      </div>
+      </div>
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
             <button role="menuitem" data-action="toggle-note">${ICONS.note}${hasNote || expanded ? '編輯備註' : '新增備註'}</button>
@@ -936,7 +946,6 @@ function renderSpotCard(spot, index, total) {
             <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
             <button role="menuitem" class="danger" data-action="remove-spot">${ICONS.trash}刪除景點</button>
           </div>` : ''}
-      </div>
       ${expanded ? `
         <div class="spot-note">
           <textarea data-spot-id="${spot.id}" rows="3" maxlength="500"
@@ -981,7 +990,17 @@ function renderLegContent(fromSpot, toSpot) {
   const modeButtons = TRAVEL_MODES.map(m => `
       <button class="seg-btn ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
         aria-pressed="${m.value === mode.value}" title="${m.label}">${ICONS[m.value]}<span>${m.label}</span></button>`).join('');
+  const dirUrl = escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode));
+  const pillText = leg?.status === 'ok'
+    ? `<strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span>`
+    : `<span class="leg-dist">${!apiKey ? '路線' : leg?.status === 'error' ? '查看路線' : '計算中…'}</span>`;
   return `
+    <div class="leg-mobile">
+      <a class="leg-pill" href="${dirUrl}" target="_blank" rel="noopener" aria-label="用 Google 地圖導航：${mode.label}">
+        ${ICONS[mode.value]}${pillText}${ICONS.external}
+      </a>
+      ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
+    </div>
     <div class="leg-row">
       <button class="leg-mode-btn ${modesOpen ? 'on' : ''}" data-action="toggle-leg-modes" aria-expanded="${modesOpen}"
         title="交通方式：${mode.label}（點一下切換）" aria-label="交通方式：${mode.label}，點一下切換">${ICONS[mode.value]}</button>
@@ -1085,6 +1104,12 @@ function renderMembers() {
           title="移除 ${escapeHtml(getMemberName(m))}" aria-label="移除 ${escapeHtml(getMemberName(m))}">${ICONS.close}</button>` : ''}
       </span>`).join('')}
     <button class="member-add" data-action="add-member" title="新增旅伴">+ 旅伴</button>`;
+  // 手機導覽列的旅伴頭像（最多顯示 3 個）
+  const shown = state.members.slice(0, 3);
+  const more = state.members.length - shown.length;
+  document.getElementById('avatar-btn').innerHTML = shown.map((m, i) =>
+    `<span class="avatar" style="--c:${DAY_COLORS[(i + 1) % DAY_COLORS.length]}">${escapeHtml([...getMemberName(m)][0])}</span>`).join('')
+    + (more > 0 ? `<span class="avatar more">+${more}</span>` : '');
 }
 
 function renderSettleButton() {
@@ -1212,14 +1237,24 @@ function handleAction(btn, spotId) {
     case 'select-day':
       setActiveDay(btn.dataset.dayId);
       fitMapToSpots(getVisibleDays().flatMap(d => d.spots));
+      if (sheet.snap === 'peek') setSheetSnap('half');
       break;
+    case 'open-spot-edit':
+      ui.swipeSpotId = null;
+      ui.spotMenuId = spotId;
+      render();
+      break;
+    case 'toggle-mobile-panel': toggleMobilePanel(); break;
     case 'add-day': addDay(); break;
     case 'remove-day': removeDay(btn.dataset.dayId); break;
     case 'move-up': moveSpotBy(spotId, -1); break;
     case 'move-down': moveSpotBy(spotId, 1); break;
     case 'toggle-note': toggleNoteEditor(spotId); break;
     case 'remove-spot': removeSpot(spotId); break;
-    case 'focus-spot': focusSpotOnMap(spotId); break;
+    case 'focus-spot':
+      focusSpotOnMap(spotId);
+      if (sheet.snap === 'full') setSheetSnap('half'); // 讓地圖露出來
+      break;
     case 'set-leg-mode': {
       const leg = btn.closest('.leg');
       ui.legModesKey = null;
@@ -1270,7 +1305,7 @@ window.addEventListener('resize', updateTabsFade);
 
 // 點選單以外的地方或按 Esc：收起景點操作選單、導覽列設定選單
 document.addEventListener('click', e => {
-  if (ui.spotMenuId && !e.target.closest('.spot-menu, [data-action="toggle-spot-menu"]')) {
+  if (ui.spotMenuId && !e.target.closest('.spot-menu, [data-action="toggle-spot-menu"], [data-action="open-spot-edit"]')) {
     ui.spotMenuId = null;
     render();
   }
@@ -1299,7 +1334,7 @@ function toggleNavMenu() {
 
 function closeNavMenu() {
   const menu = document.getElementById('nav-menu');
-  if (menu.hidden) return;
+  if (menu.hidden || isMobile()) return; // 手機上設定選單直接攤開在旅伴面板裡
   menu.hidden = true;
   document.getElementById('nav-menu-btn').setAttribute('aria-expanded', 'false');
 }
@@ -1649,6 +1684,8 @@ function openAddSpotForm(latLng, placeId, name) {
   addCard.marker.draw?.();
 
   el.hidden = false;
+  document.body.classList.add('adding'); // 手機上行程抽屜先滑下去，讓底部的新增卡片單手好操作
+  setSheetSnap('peek');
   input.focus();
   keepDraftVisible();
 
@@ -1682,6 +1719,7 @@ function updateAddCardSwatch() {
 
 function closeAddCard() {
   addCard.el.hidden = true;
+  document.body.classList.remove('adding');
   addCard.draft = null;
   addCard.marker?.setMap(null);
 }
@@ -1778,10 +1816,13 @@ function setupPlaceSearch() {
   });
   searchInput.addEventListener('keydown', onSearchKeydown);
   searchInput.addEventListener('focus', () => {
+    openMobileSearch();
     if (!searchInput.value.trim()) renderSearchHome();
     else if (search.items.length) showSearchResults();
   });
-  searchInput.addEventListener('blur', hideSearchResults);
+  searchInput.addEventListener('blur', () => {
+    if (!isMobile()) hideSearchResults(); // 手機全螢幕搜尋：按「取消」或選了地點才關閉
+  });
   // 點選建議時不要讓輸入框先失焦（失焦會關閉清單）
   searchResults.addEventListener('pointerdown', e => e.preventDefault());
   searchResults.addEventListener('click', e => {
@@ -1866,6 +1907,7 @@ function onSearchKeydown(e) {
 async function selectSuggestion(index) {
   const prediction = search.items[index];
   if (!prediction) return;
+  closeMobileSearch();
   hideSearchResults();
   searchInput.value = prediction.mainText?.text || prediction.text.text;
   searchInput.blur();
@@ -1899,6 +1941,7 @@ async function selectSuggestion(index) {
 // 最近搜尋過的地點已存有座標，不用再呼叫 Places API
 function selectRecentPlace(place) {
   if (!place) return;
+  closeMobileSearch();
   hideSearchResults();
   searchInput.value = place.name;
   searchInput.blur();
@@ -2229,6 +2272,267 @@ async function drawFallbackRoute(day, color) {
     ? '路線計算中…（Directions API 無法使用，改用各路段的交通方式畫出路線）'
     : 'Directions API 無法使用，已依各路段的交通方式畫出路線', 'info');
 }
+
+
+/* ==========================================================================
+ * 8c. 手機版（寬度 ≤ 760px）
+ *
+ *   - 地圖滿版，行程放在底部抽屜：peek（天數分頁＋下一站）、half（50%）、full（90%）三段停靠。
+ *     拖曳把手、天數列或下一站卡片可以上下拖；快速甩動會往甩的方向跳一段，否則停在最近的一段。
+ *   - 導覽列變成地圖上方的浮動卡片；旅伴與設定收進頭像按鈕的面板，出發日移到抽屜裡。
+ *   - 搜尋框點下去變成全螢幕搜尋。
+ *   - 景點卡向左滑露出「編輯」「刪除」；交通縮成可直接開 Google 地圖導航的小標籤。
+ * ========================================================================== */
+
+const mobileQuery = window.matchMedia('(max-width: 760px)');
+const sidebarEl = document.querySelector('.sidebar');
+const sheet = { snap: 'peek', drag: null, suppressClick: false };
+const SHEET_ORDER = ['peek', 'half', 'full'];
+
+function isMobile() {
+  return mobileQuery.matches;
+}
+
+function getSheetHeights() {
+  const vh = window.innerHeight;
+  const grab = ['sheet-handle', 'next-stop'].map(id => document.getElementById(id))
+    .concat(sidebarEl.querySelector('.tabs-bar'))
+    .reduce((sum, el) => sum + (el && !el.hidden ? el.offsetHeight : 0), 0);
+  const peek = Math.min(Math.max(Math.round(vh * 0.15), grab + 6), Math.round(vh * 0.4));
+  return { peek, half: Math.max(Math.round(vh * 0.5), peek + 80), full: Math.round(vh * 0.9) };
+}
+
+// 依停靠點設定抽屜高度；地圖控制項跟著抽屜高度移動（--sheet-visible）
+function layoutSheet(animate = true, height) {
+  if (!isMobile()) {
+    sidebarEl.style.height = '';
+    document.documentElement.style.removeProperty('--sheet-visible');
+    return;
+  }
+  const visible = height ?? getSheetHeights()[sheet.snap];
+  sidebarEl.classList.toggle('sheet-animate', animate);
+  sidebarEl.style.height = `${visible}px`;
+  sidebarEl.dataset.snap = sheet.snap;
+  document.documentElement.style.setProperty('--sheet-visible', `${visible}px`);
+  const handle = document.getElementById('sheet-handle');
+  handle.setAttribute('aria-expanded', String(sheet.snap !== 'peek'));
+  handle.setAttribute('aria-label', sheet.snap === 'full' ? '收合行程' : '展開行程');
+}
+
+function setSheetSnap(snap) {
+  if (!isMobile() || sheet.snap === snap) return;
+  sheet.snap = snap;
+  layoutSheet(true);
+}
+
+// 點把手：peek → half → full → peek
+document.getElementById('sheet-handle').addEventListener('click', () => {
+  if (sheet.suppressClick) return;
+  setSheetSnap(SHEET_ORDER[(SHEET_ORDER.indexOf(sheet.snap) + 1) % SHEET_ORDER.length]);
+});
+
+// 拖曳手勢：先判斷是上下拖，才接管指標，左右滑仍交給天數分頁捲動
+sidebarEl.addEventListener('pointerdown', e => {
+  if (!isMobile() || !e.target.closest('.sheet-handle, .tabs-bar, .next-stop')) return;
+  sheet.drag = { x: e.clientX, y: e.clientY, startHeight: sidebarEl.offsetHeight, started: false, id: e.pointerId, samples: [] };
+});
+// 移動與放開掛在 window：手指移出抽屜範圍時仍收得到
+window.addEventListener('pointermove', e => {
+  const d = sheet.drag;
+  if (!d || e.pointerId !== d.id) return;
+  const dx = e.clientX - d.x;
+  const dy = e.clientY - d.y;
+  if (!d.started) {
+    if (Math.abs(dy) < 6 || Math.abs(dy) < Math.abs(dx)) return;
+    d.started = true;
+    sidebarEl.setPointerCapture(e.pointerId);
+  }
+  const { peek, full } = getSheetHeights();
+  const height = Math.min(full, Math.max(peek, d.startHeight - dy));
+  d.samples.push({ t: e.timeStamp, h: height });
+  if (d.samples.length > 5) d.samples.shift();
+  layoutSheet(false, height);
+});
+const endSheetDrag = e => {
+  const d = sheet.drag;
+  sheet.drag = null;
+  if (!d?.started || e.pointerId !== d.id) return;
+  const heights = getSheetHeights();
+  const current = sidebarEl.offsetHeight;
+  const first = d.samples[0];
+  const last = d.samples[d.samples.length - 1];
+  const velocity = first && last && last.t > first.t ? (last.h - first.h) / (last.t - first.t) : 0; // px/ms，往上為正
+  const nearest = SHEET_ORDER.reduce((best, snap) => (Math.abs(heights[snap] - current) < Math.abs(heights[best] - current) ? snap : best));
+  if (velocity > 0.5) sheet.snap = SHEET_ORDER.find(snap => heights[snap] > current + 10) || 'full'; // 往上甩：下一段
+  else if (velocity < -0.5) sheet.snap = [...SHEET_ORDER].reverse().find(snap => heights[snap] < current - 10) || 'peek'; // 往下甩
+  else sheet.snap = nearest;
+  layoutSheet(true);
+  // 拖曳結束時手指下方的分頁或卡片不要被當成點擊
+  sheet.suppressClick = true;
+  setTimeout(() => { sheet.suppressClick = false; }, 250);
+};
+window.addEventListener('pointerup', endSheetDrag);
+window.addEventListener('pointercancel', endSheetDrag);
+sidebarEl.addEventListener('click', e => {
+  if (sheet.suppressClick) {
+    e.stopPropagation();
+    e.preventDefault();
+  }
+}, true);
+window.addEventListener('resize', () => layoutSheet(false));
+
+// ---------- 下一站摘要卡（peek 狀態下也看得到） ----------
+// 旅途中顯示今天那天，其餘顯示目前分頁那天；「全部」時取第一個有景點的那天
+function getNextStopDay() {
+  if (state.activeDayId !== OVERVIEW && getDay(state.activeDayId)) return getDay(state.activeDayId);
+  const start = getDayDate(0);
+  if (start) {
+    const now = new Date();
+    const index = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - start) / 86400000);
+    if (state.days[index]?.spots.length) return state.days[index];
+  }
+  return state.days.find(d => d.spots.length) || state.days[0];
+}
+
+function renderNextStop() {
+  const el = document.getElementById('next-stop');
+  const day = getNextStopDay();
+  const dayIndex = getDayIndex(day.id);
+  el.hidden = false;
+  el.style.setProperty('--c', getDayColor(dayIndex));
+  if (!day.spots.length) {
+    el.dataset.spotId = '';
+    el.innerHTML = `<span class="next-label">${getDayLabel(dayIndex)}</span><span class="next-name muted">點地圖或搜尋，加入第一個景點</span>`;
+    return;
+  }
+  const spot = day.spots[0];
+  const travel = renderDayTravel(day);
+  el.dataset.spotId = spot.id;
+  el.innerHTML = `
+    <span class="spot-index">1</span>
+    <span class="next-text">
+      <span class="next-label">下一站・${getDayLabel(dayIndex)}${getDayDateText(dayIndex) ? ` ${getDayDateText(dayIndex)}` : ''}</span>
+      <span class="next-name">${escapeHtml(spot.name)}</span>
+    </span>
+    <span class="next-meta">${day.spots.length} 站${travel ? `<br>${travel}` : ''}</span>`;
+}
+
+document.getElementById('next-stop').addEventListener('click', e => {
+  const spotId = e.currentTarget.dataset.spotId;
+  if (spotId) focusSpotOnMap(spotId);
+  setSheetSnap('half');
+});
+
+// ---------- 景點卡向左滑：露出「編輯」「刪除」 ----------
+const SWIPE_WIDTH = 152;
+let swipe = null;
+
+function setSwipedSpot(spotId) {
+  ui.swipeSpotId = spotId;
+  dayListEl.querySelectorAll('.spot').forEach(el => {
+    const on = el.dataset.spotId === spotId;
+    el.classList.toggle('swiped', on);
+    el.querySelector('.swipe-actions')?.setAttribute('aria-hidden', String(!on));
+    const main = el.querySelector('.spot-main');
+    if (main) main.style.transform = '';
+  });
+}
+
+dayListEl.addEventListener('pointerdown', e => {
+  const row = e.target.closest('.spot-row');
+  if (!isMobile() || !row || e.target.closest('.swipe-actions')) return;
+  const spotId = row.closest('.spot').dataset.spotId;
+  swipe = { x: e.clientX, y: e.clientY, spotId, main: row.querySelector('.spot-main'), base: ui.swipeSpotId === spotId ? -SWIPE_WIDTH : 0, started: false, id: e.pointerId };
+});
+window.addEventListener('pointermove', e => {
+  if (!swipe || e.pointerId !== swipe.id) return;
+  const dx = e.clientX - swipe.x;
+  const dy = e.clientY - swipe.y;
+  if (!swipe.started) {
+    if (Math.abs(dx) < 8 || Math.abs(dx) < Math.abs(dy)) return;
+    swipe.started = true;
+    swipe.main.setPointerCapture(e.pointerId);
+    if (ui.swipeSpotId && ui.swipeSpotId !== swipe.spotId) setSwipedSpot(null);
+    swipe.main.classList.add('dragging-x');
+  }
+  const x = Math.min(0, Math.max(-SWIPE_WIDTH - 24, swipe.base + dx));
+  swipe.main.style.transform = `translateX(${x}px)`;
+});
+const endSwipe = e => {
+  const s = swipe;
+  swipe = null;
+  if (!s?.started || e.pointerId !== s.id) return;
+  s.main.classList.remove('dragging-x');
+  const x = s.base + (e.clientX - s.x);
+  setSwipedSpot(x < -SWIPE_WIDTH / 2 ? s.spotId : null);
+  sheet.suppressClick = true; // 滑完不要觸發卡片點擊
+  setTimeout(() => { sheet.suppressClick = false; }, 250);
+};
+window.addEventListener('pointerup', endSwipe);
+window.addEventListener('pointercancel', endSwipe);
+// 點其他地方收回滑開的卡片
+document.addEventListener('click', e => {
+  if (sheet.suppressClick) return; // 剛滑完放開手指產生的點擊
+  if (ui.swipeSpotId && !e.target.closest('.spot.swiped .swipe-actions')) setSwipedSpot(null);
+}, true);
+
+// ---------- 浮動導覽列：旅伴與設定面板、全螢幕搜尋 ----------
+function toggleMobilePanel(force) {
+  const panel = document.getElementById('mobile-panel');
+  const open = force ?? panel.hidden;
+  panel.hidden = !open;
+  document.getElementById('avatar-btn').setAttribute('aria-expanded', String(open));
+}
+
+document.addEventListener('click', e => {
+  if (!document.getElementById('mobile-panel').hidden && !e.target.closest('#mobile-panel, #avatar-btn')) toggleMobilePanel(false);
+});
+
+function openMobileSearch() {
+  if (!isMobile()) return;
+  document.querySelector('.topbar').classList.add('search-open');
+  toggleMobilePanel(false);
+}
+
+function closeMobileSearch() {
+  document.querySelector('.topbar').classList.remove('search-open');
+}
+
+document.getElementById('search-cancel').addEventListener('click', () => {
+  closeMobileSearch();
+  hideSearchResults();
+  searchInput.blur();
+});
+
+// 手機與桌面版的版面差異：把旅伴、設定、出發日搬到對應的位置
+function placeForViewport() {
+  const mobile = isMobile();
+  const panel = document.getElementById('mobile-panel');
+  const members = document.getElementById('members');
+  const navWrap = document.querySelector('.nav-menu-wrap');
+  const tripSub = document.querySelector('.trip-sub');
+  // 手機導覽列較窄，搜尋提示改短（Places 不能用時保留原本的說明）
+  if (!searchInput.dataset.placeholder) searchInput.dataset.placeholder = searchInput.placeholder;
+  if (searchInput.placeholder === searchInput.dataset.placeholder || searchInput.placeholder === '搜尋') {
+    searchInput.placeholder = mobile ? '搜尋' : searchInput.dataset.placeholder;
+  }
+  if (mobile) {
+    panel.append(members, navWrap);
+    document.querySelector('.sidebar-header').prepend(tripSub);
+    document.getElementById('nav-menu').hidden = false;
+  } else {
+    const right = document.querySelector('.topbar-right');
+    right.prepend(members);
+    right.append(navWrap);
+    document.querySelector('.trip-meta').append(tripSub);
+    document.getElementById('nav-menu').hidden = true;
+    toggleMobilePanel(false);
+    closeMobileSearch();
+    setSwipedSpot(null);
+  }
+  layoutSheet(false);
+}
+mobileQuery.addEventListener('change', placeForViewport);
 
 
 /* ==========================================================================
@@ -2603,6 +2907,7 @@ function renderSyncBar() {
  * 10. 啟動
  * ========================================================================== */
 
+placeForViewport();
 render();
 if (sharedTripId) joinSharedTrip();
 if (apiKey) {

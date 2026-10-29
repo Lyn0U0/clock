@@ -570,7 +570,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .spot-more { opacity: 0; transition: opacity .15s, background .15s, border-color .15s; }
 .spot:hover .spot-more, .spot:focus-within .spot-more, .spot-more.on { opacity: 1; }
 @media (hover: none) { .spot-more { opacity: 1; } }
-.spot-menu { top: calc(100% - 4px); right: 6px; }
+.spot-menu { top: 46px; right: 6px; }
+.spot-row { position: relative; }
 .spot-note { padding: 0 10px 10px 54px; }
 .spot-note textarea {
   width: 100%;
@@ -1058,46 +1059,321 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .topbar { gap: 16px; }
 }
 
+/* 手機專用元素：桌面版不顯示 */
+.sheet-handle, .next-stop, .avatar-btn, .mobile-panel, .search-cancel, .swipe-actions, .leg-mobile { display: none; }
+
+/* ==========================================================================
+ * 手機版（≤ 760px）：滿版地圖 + 浮動導覽列 + 底部抽屜
+ * 線條統一 2px 黑框、硬陰影收斂為 2px；所有可點元素至少 44×44px（小標籤用透明熱區補足）
+ * ========================================================================== */
 @media (max-width: 760px) {
-  .topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "brand nav" "search search" "members settle";
-    gap: 10px 12px;
-    padding: 10px 16px 12px;
+  :root {
+    --shadow-cta: 2px 2px 0 var(--ink);
+    --shadow-pop: 2px 2px 0 var(--ink);
+    --line: 2px solid var(--ink);
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --gutter-l: max(12px, env(safe-area-inset-left, 0px));
+    --gutter-r: max(12px, env(safe-area-inset-right, 0px));
   }
-  .brand { grid-area: brand; }
-  .brand-mark { width: 34px; height: 34px; }
-  .trip-name { font-size: 17px; max-width: 100%; }
-  .topbar-right { display: contents; }
-  .nav-menu-wrap { grid-area: nav; justify-self: end; }
-  .trip-sub { flex-wrap: wrap; row-gap: 2px; }
-  .settle-btn { justify-self: end; }
-  .settle-btn { grid-area: settle; height: 36px; font-size: 12px; padding-left: 12px; }
-  .search { grid-area: search; width: 100%; }
-  .members { grid-area: members; }
-  .app { flex-direction: column; }
-  .map-wrap { order: -1; flex: none; height: 40%; }
-  #map { inset: 10px 16px 8px; }
-  .map-tools { top: 20px; right: 26px; }
-  .route-status { top: 58px; right: 26px; }
-  .map-controls { right: 26px; bottom: 18px; gap: 6px; }
-  .map-controls button { width: 34px; height: 34px; }
-  .sidebar { width: 100%; height: auto; flex: 1; min-height: 0; }
-  .sidebar-header { padding: 10px 16px 0; }
+  body { display: block; }
+
+  /* 滿版地圖 */
+  .app { display: block; }
+  .map-wrap { position: fixed; inset: 0; height: auto; z-index: 0; }
+  #map { inset: 0; border: none; border-radius: 0; }
+  .map-tools { top: calc(var(--safe-top) + 78px); right: var(--gutter-r); }
+  .route-status { top: calc(var(--safe-top) + 128px); right: var(--gutter-r); max-width: calc(100% - 24px); }
+  .map-controls {
+    right: var(--gutter-r);
+    bottom: calc(var(--sheet-visible, 150px) + 14px);
+    gap: 8px;
+    transition: bottom .28s cubic-bezier(.2, .8, .2, 1);
+  }
+  .map-controls button { width: 44px; height: 44px; }
+  .map-controls [data-map="fullscreen"] { display: none; } /* 地圖本來就滿版 */
+
+  /* 浮動導覽列：行程名稱｜搜尋膠囊｜結算・旅伴 */
+  .topbar {
+    position: fixed;
+    top: calc(var(--safe-top) + 10px);
+    left: var(--gutter-l);
+    right: var(--gutter-r);
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px;
+    padding: 6px;
+    border: 2px solid var(--ink);
+    border-radius: 16px;
+    background: var(--paper);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  .brand-mark { display: none; }
+  .trip-name {
+    max-width: 6.5em;
+    height: 44px;
+    margin: 0;
+    padding: 0 4px 0 6px;
+    font-size: 15px;
+    text-overflow: ellipsis;
+  }
+  .search input { height: 44px; padding-left: 34px; font-size: 14px; border-width: 1.5px; }
+  .search input::placeholder { font-size: 13px; }
+  .search > svg { left: 12px; }
+  .search input:focus { border: 2px solid var(--ink); box-shadow: none; }
+  .topbar-right { gap: 2px; }
+  .settle-btn { height: 44px; padding: 0 4px 0 9px; gap: 5px; font-size: 14px; }
+  .settle-text { display: none; }
+  .settle-btn-total { padding: 3px 8px; font-size: 12px; }
+  .avatar-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    height: 44px;
+    padding: 0 2px 0 10px;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .avatar {
+    display: grid;
+    place-items: center;
+    width: 28px; height: 28px;
+    margin-left: -10px;
+    border: 2px solid var(--ink);
+    border-radius: 50%;
+    background: var(--c);
+    font-size: 12px;
+    font-weight: 900;
+  }
+  .avatar.more { background: var(--paper); font-size: 10px; }
+
+  /* 旅伴與設定面板（點頭像打開） */
+  .mobile-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0; right: 0;
+    padding: 14px;
+    border: 2px solid var(--ink);
+    border-radius: 16px;
+    background: var(--paper);
+    box-shadow: 2px 2px 0 var(--ink);
+  }
+  .mobile-panel .members { flex-wrap: wrap; overflow: visible; gap: 8px; }
+  .mobile-panel .members-label { display: block; flex-basis: 100%; }
+  .mobile-panel .member-name { height: 40px; font-size: 14px; }
+  .mobile-panel .member-remove { width: 32px; height: 32px; }
+  .mobile-panel .member-add { height: 40px; padding: 0 14px; }
+  .mobile-panel .nav-btn { display: none; }
+  .mobile-panel .nav-menu {
+    position: static;
+    min-width: 0;
+    padding: 8px 0 0;
+    border: none;
+    border-top: 1.5px solid var(--edge);
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .mobile-panel .menu [role="menuitem"] { min-height: 44px; font-size: 14px; }
+
+  /* 全螢幕搜尋 */
+  .topbar.search-open .search {
+    position: fixed;
+    inset: 0;
+    z-index: 950;
+    display: flex;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    gap: 10px;
+    padding: calc(var(--safe-top) + 12px) var(--gutter-r) 16px var(--gutter-l);
+    background: var(--bg);
+  }
+  .topbar.search-open .search input { flex: 1; width: auto; border: 2px solid var(--ink); }
+  .topbar.search-open .search > svg { top: calc(var(--safe-top) + 34px); left: calc(var(--gutter-l) + 12px); }
+  .topbar.search-open .search-cancel {
+    display: block;
+    min-width: 44px;
+    height: 44px;
+    border: none;
+    background: transparent;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .topbar.search-open .search-results {
+    position: static;
+    flex-basis: 100%;
+    max-height: none;
+    padding: 0;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  .search-item { min-height: 52px; justify-content: center; }
+  .chip { min-height: 40px; padding: 0 14px; font-size: 13px; }
+
+  /* 底部抽屜：把手 → 天數分頁 → 下一站 → 行程摘要 → 每日行程（內部捲動） */
+  .sidebar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 650;
+    width: auto;
+    height: 150px;
+    border-top: 2px solid var(--ink);
+    border-radius: 20px 20px 0 0;
+    background: var(--bg);
+    box-shadow: 0 -2px 0 var(--ink);
+    overflow: hidden;
+  }
+  .sidebar.sheet-animate { transition: height .28s cubic-bezier(.2, .8, .2, 1); }
+  .sidebar { transition: transform .22s ease; }
+  body.adding .sidebar { transform: translateY(105%); }   /* 新增景點時抽屜讓位給底部卡片 */
+  body.adding .map-controls { display: none; }
+  .sheet-handle {
+    order: 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-shrink: 0;
+    width: 100%;
+    height: 26px;
+    border: none;
+    background: transparent;
+    cursor: grab;
+    touch-action: none;
+  }
+  .sheet-handle span { width: 48px; height: 6px; border-radius: 3px; background: var(--ink); }
+  .tabs-bar { order: 1; flex-shrink: 0; padding: 0 var(--gutter-r) 8px var(--gutter-l); border-bottom: none; touch-action: pan-x; }
+  .tabs-arrow { display: none !important; }
+  .tab, .tab-add { height: 44px; padding: 0 14px; }
+  .next-stop {
+    order: 2;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+    min-height: 58px;
+    margin: 0 var(--gutter-r) 10px var(--gutter-l);
+    padding: 8px 12px;
+    border: 2px solid var(--ink);
+    border-radius: 14px;
+    background: var(--paper);
+    box-shadow: 2px 2px 0 var(--ink);
+    text-align: left;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .next-stop .spot-index { width: 30px; height: 30px; box-shadow: inset 0 0 0 2px var(--ink); }
+  .next-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .next-label { font-size: 11px; font-weight: 700; color: var(--muted); }
+  .next-name { font-size: 15px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .next-name.muted { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .next-meta { flex-shrink: 0; font-size: 11px; font-weight: 700; color: var(--ink-2); text-align: right; line-height: 1.5; }
+  .sidebar-header { order: 3; flex-shrink: 0; padding: 2px var(--gutter-r) 0 var(--gutter-l); }
+  .sidebar-header .trip-sub { flex-wrap: wrap; padding: 4px 0; font-size: 13px; }
+  .sidebar-header .countdown { flex-basis: 100%; padding-left: 0; border-left: none; }
+  .trip-date input { min-height: 36px; font-size: 13px; }
   .hint { display: none; }
-  .tabs-bar { padding: 8px 16px; }
-  .day-list { padding: 14px 16px 40px; }
-  /* 手機上新增景點改成貼齊畫面底部的面板 */
+  .day-list { order: 4; padding: 12px var(--gutter-r) calc(28px + var(--safe-bottom)) var(--gutter-l); }
+
+  /* 卡片：2px 黑框 */
+  .day, .spot, .expense-panel { border: 2px solid var(--ink); }
+  .day-head { border-bottom: 2px solid var(--ink); border-radius: 14px 14px 0 0; }
+  .icon-btn { width: 44px; height: 44px; }
+  .day-head .day-remove { margin-right: -6px; }
+
+  /* 景點卡：拿掉把手與「⋯」，向左滑露出「編輯」「刪除」 */
+  .drag-handle, .spot-more { display: none; }
+  .spot-row { overflow: hidden; border-radius: 10px; touch-action: pan-y; }
+  .spot-main {
+    z-index: 1;
+    min-height: 60px;
+    padding: 8px 10px;
+    background: var(--paper);
+    transition: transform .22s cubic-bezier(.2, .8, .2, 1);
+  }
+  .spot-main.dragging-x { transition: none; }
+  .spot.swiped .spot-main { transform: translateX(-152px); }
+  .swipe-actions { display: flex; position: absolute; top: 0; right: 0; bottom: 0; width: 152px; }
+  .swipe-actions button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    min-height: 44px;
+    border: none;
+    border-left: 2px solid var(--ink);
+    background: var(--primary);
+    font-size: 12px;
+    font-weight: 900;
+    cursor: pointer;
+  }
+  .swipe-actions .danger { background: var(--danger); color: var(--paper); }
+  .swipe-actions svg { width: 18px; height: 18px; }
+  .spot-menu { top: 56px; }
+  .spot-note { padding: 0 10px 10px; }
+
+  /* 小標籤用透明熱區補足 44px */
+  .expense-badge, .leg-pill, .member-remove, .link-btn { position: relative; }
+  :is(.expense-badge, .leg-pill, .member-remove, .link-btn)::after { content: ""; position: absolute; inset: -8px -4px; }
+  .expense-badge { height: 32px; font-size: 12px; }
+
+  /* 交通：極簡圓角標籤，點了直接開 Google 地圖導航 */
+  .leg { padding: 8px 0 8px 10px; }
+  .leg::before { left: 24px; border-left-width: 2px; }
+  .leg-row, .leg-modes { display: none; }
+  .leg-mobile { display: flex; align-items: center; gap: 8px; }
+  .leg-mobile .expense-badge:not(.has):not(.on) { display: none; }
+  .leg-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 34px;
+    padding: 0 12px;
+    border: 2px solid var(--ink);
+    border-radius: 999px;
+    background: var(--paper);
+    box-shadow: 2px 2px 0 var(--ink);
+    color: var(--ink);
+    font-size: 12px;
+    text-decoration: none;
+  }
+  .leg-pill svg { width: 15px; height: 15px; }
+  .leg-pill svg:last-child { width: 12px; height: 12px; color: var(--muted); }
+  .leg-pill strong { font-size: 13px; font-weight: 900; }
+  .leg-pill:active { transform: translate(2px, 2px); box-shadow: none; }
+
+  /* 記帳面板 */
+  .field, .expense-title, .expense-amount { height: 44px; }
+  .pill span { padding: 9px 14px; font-size: 13px; }
+  .link-btn { padding: 8px 10px; font-size: 13px; }
+
+  /* 新增景點：從底部滑出、單手好操作 */
   .add-card {
     position: fixed;
     left: 0; right: 0; bottom: 0;
+    z-index: 800;
     width: auto;
-    padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    padding: 14px var(--gutter-r) calc(18px + var(--safe-bottom)) var(--gutter-l);
     border-width: 2px 0 0;
-    border-radius: 18px 18px 0 0;
-    box-shadow: 0 -4px 0 var(--ink);
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -2px 0 var(--ink);
     transform: none;
-    animation: sheet-in .2s ease;
+    animation: sheet-in .22s ease;
   }
-  @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }
+  @keyframes sheet-in { from { transform: translateY(32px); opacity: 0; } }
+  .add-card-field .field { height: 48px; font-size: 16px; } /* 16px 避免 iOS 聚焦時自動放大 */
+  .add-card-row { flex-direction: column; align-items: stretch; }
+  .add-card .btn-primary { height: 50px; font-size: 16px; }
+
+  .sync-btn { min-height: 44px; }
+  .spot-info { align-self: stretch; justify-content: center; }
+  .map-chip { height: 44px; }
+  .drawer-head .icon-btn { width: 44px; height: 44px; }
 }

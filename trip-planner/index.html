@@ -36,13 +36,16 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input id="place-search" type="search" placeholder="搜尋地點，或直接點擊地圖" autocomplete="off" disabled
         role="combobox" aria-expanded="false" aria-controls="search-results" aria-autocomplete="list" aria-label="搜尋地點">
+      <button type="button" class="search-cancel" id="search-cancel">取消</button>
       <ul class="search-results" id="search-results" role="listbox" hidden></ul>
     </div>
     <div class="topbar-right">
       <div class="members" id="members"></div>
-      <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog">
-        <span>💰 旅費結算</span><span class="settle-btn-total" id="settle-total">NT$ 0</span>
+      <button class="settle-btn" data-action="open-settle" aria-haspopup="dialog" aria-label="旅費結算">
+        <span class="settle-label"><span aria-hidden="true">💰</span><span class="settle-text"> 旅費結算</span></span><span class="settle-btn-total" id="settle-total">NT$ 0</span>
       </button>
+      <button class="avatar-btn" id="avatar-btn" data-action="toggle-mobile-panel" aria-expanded="false"
+        aria-controls="mobile-panel" aria-label="旅伴與設定"></button>
       <div class="nav-menu-wrap">
         <button class="icon-btn nav-btn" id="nav-menu-btn" data-action="toggle-nav-menu" aria-haspopup="menu"
           aria-expanded="false" aria-label="設定" title="設定">
@@ -60,10 +63,12 @@
         </div>
       </div>
     </div>
+    <div class="mobile-panel" id="mobile-panel" hidden></div>
   </header>
 
   <div class="app">
-    <aside class="sidebar">
+    <aside class="sidebar" aria-label="行程">
+      <button class="sheet-handle" id="sheet-handle" aria-label="展開行程" aria-expanded="false"><span></span></button>
       <div class="sidebar-header">
         <div class="summary" id="summary"></div>
         <p class="hint">點地圖或搜尋加入景點，按住左側把手拖曳調整順序。</p>
@@ -81,6 +86,7 @@
         </div>
         <button class="tab tab-add" data-action="add-day" title="新增一天">+ Day</button>
       </div>
+      <button class="next-stop" id="next-stop" hidden></button>
       <div class="day-list" id="day-list"></div>
     </aside>
 
