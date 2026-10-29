@@ -48,6 +48,17 @@ const TRAVEL_MODES = [
 ];
 const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }];
 const MIN_MEMBERS = 1;
+// 景點圖示：value 空字串代表顯示當天的順序編號
+const SPOT_ICONS = [
+  { value: '', label: '編號' },
+  { value: '🏠', label: '住宿／起點' },
+  { value: '🍜', label: '小吃美食' },
+  { value: '🥩', label: '餐廳' },
+  { value: '☕', label: '咖啡甜點' },
+  { value: '📷', label: '景點拍照' },
+  { value: '🏞️', label: '自然風景' },
+  { value: '🛍️', label: '購物採買' }
+];
 // 每天的代表色（分頁、圖釘、卡片標頭），文字一律用黑色，所以都選明亮的顏色
 const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78BFA', '#22D3EE', '#F9A8D4'];
 
@@ -66,7 +77,7 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     members: [{ id, name }],                                // 旅伴，預設只有「我」
  *     expenses: [Expense]                                     // 記帳
  *   }
- *   Spot = { id, name, lat, lng, placeId, note }  // spots 陣列順序就是當天的參觀順序
+ *   Spot = { id, name, lat, lng, placeId, note, icon }  // spots 陣列順序就是當天的參觀順序；icon 為 Emoji，空字串顯示編號
  *   Expense = {
  *     id, title, amount, paidBy: memberId,
  *     ref: 'spot:<spotId>' | 'leg:<fromSpotId>-><toSpotId>',  // 掛在哪張卡片上
@@ -93,6 +104,8 @@ const ui = {
   spotMenuId: null,         // 開著「⋯」操作選單的景點
   legModesKey: null,        // 開著交通方式切換的路段（fromId->toId）
   swipeSpotId: null,        // 手機上向左滑開操作按鈕的景點
+  iconPickerSpotId: null,   // 開著圖示選單的景點
+  legDetailsKey: null,      // 展開大眾運輸轉乘細節的路段（fromId->toId）
   renderOnBlur: false       // 打字中收到雲端更新時，等離開輸入框再重繪
 };
 
@@ -105,7 +118,7 @@ function createDay() {
 }
 
 function createSpot({ name, lat, lng, placeId }) {
-  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, note: '' };
+  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, note: '', icon: '' };
 }
 
 // 個人行程與每個共享行程各自有一份本機資料（共享行程的是雲端資料的快取）
@@ -145,6 +158,9 @@ function normalizeState(s) {
   if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
   if (!Array.isArray(s.expenses)) s.expenses = [];
   if (typeof s.tripName !== 'string') s.tripName = '';
+  s.days.forEach(day => day.spots.forEach(spot => {
+    if (!SPOT_ICONS.some(i => i.value === spot.icon)) spot.icon = '';
+  }));
   if (typeof s.startDate !== 'string') s.startDate = '';
   return s;
 }
@@ -522,6 +538,14 @@ function moveSpotBy(spotId, offset) {
   if (found) moveSpot(spotId, found.index + offset);
 }
 
+function setSpotIcon(spotId, icon) {
+  const found = findSpot(spotId);
+  if (!found || !SPOT_ICONS.some(i => i.value === icon)) return;
+  found.spot.icon = icon;
+  ui.iconPickerSpotId = null;
+  commit(); // 卡片、下一站卡片、地圖圖釘一起更新
+}
+
 // 打字時只更新資料並儲存，不整個重繪，避免輸入框失去焦點
 function updateSpotNote(spotId, note) {
   const found = findSpot(spotId);
@@ -610,6 +634,7 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': apiKey,
         'X-Goog-FieldMask': 'routes.duration,routes.distanceMeters,routes.description,routes.polyline.encodedPolyline'
+          + (mode === 'TRANSIT' ? ',routes.legs.steps.travelMode,routes.legs.steps.staticDuration,routes.legs.steps.distanceMeters,routes.legs.steps.transitDetails' : '')
       },
       body: JSON.stringify(body)
     });
@@ -630,8 +655,74 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
     durationSec: parseInt(route.duration, 10) || 0,
     distanceMeters: route.distanceMeters || 0,
     description: route.description || '',
-    polyline: route.polyline?.encodedPolyline || '' // 畫當日路線用
+    polyline: route.polyline?.encodedPolyline || '', // 畫當日路線用
+    transitSteps: mode === 'TRANSIT' ? parseTransitSteps(route.legs?.flatMap(l => l.steps || []) || []) : []
   };
+}
+
+const VEHICLE_LABELS = {
+  BUS: '公車', INTERCITY_BUS: '客運', TROLLEYBUS: '公車', SHARE_TAXI: '共乘',
+  SUBWAY: '捷運', METRO_RAIL: '捷運', MONORAIL: '單軌', TRAM: '輕軌',
+  HIGH_SPEED_TRAIN: '高鐵', HEAVY_RAIL: '火車', RAIL: '火車', COMMUTER_TRAIN: '火車', LONG_DISTANCE_TRAIN: '火車',
+  FERRY: '渡輪', CABLE_CAR: '纜車', GONDOLA_LIFT: '纜車', FUNICULAR: '纜車'
+};
+
+// 把 Routes API 的步驟整理成轉乘時間軸：連續的步行合併成一段，搭乘段取出運具、路線、站名與站數
+function parseTransitSteps(steps) {
+  const out = [];
+  steps.forEach(step => {
+    const sec = parseInt(step.staticDuration, 10) || 0;
+    const meters = step.distanceMeters || 0;
+    const td = step.transitDetails;
+    if (step.travelMode === 'TRANSIT' && td) {
+      const line = td.transitLine || {};
+      out.push({
+        type: 'ride',
+        vehicle: line.vehicle?.name?.text || VEHICLE_LABELS[line.vehicle?.type] || '大眾運輸',
+        line: line.nameShort || line.name || '',
+        trip: td.tripShortText || '',
+        headsign: td.headsign || '',
+        color: line.color || '',
+        textColor: line.textColor || '',
+        from: td.stopDetails?.departureStop?.name || '',
+        to: td.stopDetails?.arrivalStop?.name || '',
+        departTime: td.localizedValues?.departureTime?.time?.text || '',
+        stops: td.stopCount || 0,
+        sec
+      });
+      return;
+    }
+    const last = out[out.length - 1];
+    if (last?.type === 'walk') {
+      last.sec += sec;
+      last.meters += meters;
+    } else {
+      out.push({ type: 'walk', sec, meters });
+    }
+  });
+  return out.filter(s => s.type === 'ride' || s.sec >= 30 || s.meters >= 20); // 拿掉幾乎為零的步行
+}
+
+function renderTransitSteps(steps) {
+  return `<ol class="transit-steps" aria-label="轉乘步驟">${steps.map(step => {
+    if (step.type === 'walk') {
+      return `<li class="ts ts-walk"><span class="ts-dot">${ICONS.WALK}</span>
+        <span class="ts-main">步行 ${formatDuration(step.sec)}<span class="ts-sub">（${formatDistance(step.meters)}）</span></span></li>`;
+    }
+    const badgeStyle = step.color ? ` style="background:${escapeHtml(step.color)};color:${escapeHtml(step.textColor || '#FFFFFF')}"` : '';
+    const meta = [step.departTime && `${escapeHtml(step.departTime)} 上車`, step.stops && `${step.stops} 站`, formatDuration(step.sec)].filter(Boolean).join('・');
+    return `<li class="ts ts-ride"><span class="ts-dot">${ICONS.TRANSIT}</span>
+      <div class="ts-main">
+        <div class="ts-head">
+          <span class="ts-vehicle">${escapeHtml(step.vehicle)}</span>
+          ${step.line ? `<span class="ts-line"${badgeStyle}>${escapeHtml(step.line)}</span>` : ''}
+          ${step.trip ? `<span class="ts-sub">車次 ${escapeHtml(step.trip)}</span>` : ''}
+          ${step.headsign ? `<span class="ts-sub">往 ${escapeHtml(step.headsign)}</span>` : ''}
+        </div>
+        <div class="ts-stops">${escapeHtml(step.from)}<span class="ts-arrow" aria-label="到">➔</span>${escapeHtml(step.to)}</div>
+        <div class="ts-sub">${meta}</div>
+      </div></li>`;
+  }).join('')}</ol>`;
 }
 
 // 計算畫面上所有還沒算過的 Leg（每次 render 後呼叫）
@@ -929,7 +1020,8 @@ function renderSpotCard(spot, index, total) {
       </div>
       <div class="spot-main">
         <span class="drag-handle" title="拖曳調整順序">${ICONS.grip}</span>
-        <span class="spot-index">${index + 1}</span>
+        <button class="spot-index ${spot.icon ? 'has-icon' : ''}" data-action="toggle-icon-picker" aria-haspopup="menu"
+          aria-expanded="${ui.iconPickerSpotId === spot.id}" title="更換圖示" aria-label="第 ${index + 1} 站，更換圖示">${spot.icon || index + 1}</button>
         <button class="spot-info" data-action="focus-spot" title="在地圖上查看">
           <span class="spot-name">${escapeHtml(spot.name)}</span>
           ${subline}
@@ -939,6 +1031,13 @@ function renderSpotCard(spot, index, total) {
           title="更多操作" aria-label="${escapeHtml(spot.name)} 的更多操作" aria-haspopup="menu" aria-expanded="${menuOpen}">${ICONS.more}</button>
       </div>
       </div>
+        ${ui.iconPickerSpotId === spot.id ? `
+          <div class="menu icon-picker" role="menu" aria-label="選擇景點圖示">
+            ${SPOT_ICONS.map(i => `
+              <button role="menuitemradio" aria-checked="${spot.icon === i.value}" data-action="set-spot-icon" data-icon="${i.value}">
+                <span class="ip-emoji">${i.value || index + 1}</span><span class="ip-label">${i.label}</span>
+              </button>`).join('')}
+          </div>` : ''}
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
             <button role="menuitem" data-action="toggle-note">${ICONS.note}${hasNote || expanded ? '編輯備註' : '新增備註'}</button>
@@ -974,6 +1073,12 @@ function renderLegContent(fromSpot, toSpot) {
   const key = getPairKey(fromSpot, toSpot);
   const modesOpen = ui.legModesKey === key;
   const leg = apiKey ? legCache.get(getLegKey(fromSpot, toSpot, mode.value)) : null;
+  const hasDetails = mode.value === 'TRANSIT' && leg?.status === 'ok' && leg.transitSteps?.length > 0;
+  const detailsOpen = hasDetails && ui.legDetailsKey === key;
+  const detailsBtn = hasDetails
+    ? `<button class="icon-btn leg-details-btn ${detailsOpen ? 'on' : ''}" data-action="toggle-leg-details" aria-expanded="${detailsOpen}"
+        title="${detailsOpen ? '收合' : '展開'}轉乘細節" aria-label="${detailsOpen ? '收合' : '展開'}轉乘細節">${detailsOpen ? '▲' : '▼'}</button>`
+    : '';
   let info;
   if (!apiKey) {
     info = `<span class="leg-info muted">設定地圖金鑰後顯示交通時間</span>`;
@@ -984,8 +1089,12 @@ function renderLegContent(fromSpot, toSpot) {
       <button class="link-btn" data-action="retry-leg">重試</button>`;
   } else {
     const via = leg.description ? `，經 ${leg.description}` : '';
-    info = `<span class="leg-info" title="${escapeHtml(`${mode.label} ${formatDuration(leg.durationSec)}，${formatDistance(leg.distanceMeters)}${via}`)}">
-        <strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span></span>`;
+    const title = escapeHtml(`${mode.label} ${formatDuration(leg.durationSec)}，${formatDistance(leg.distanceMeters)}${via}`);
+    const text = `<strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span>`;
+    // 有轉乘細節時，點時間文字也能展開
+    info = hasDetails
+      ? `<button class="leg-info as-btn" data-action="toggle-leg-details" aria-expanded="${detailsOpen}" title="${title}">${text}</button>`
+      : `<span class="leg-info" title="${title}">${text}</span>`;
   }
   const modeButtons = TRAVEL_MODES.map(m => `
       <button class="seg-btn ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
@@ -999,17 +1108,20 @@ function renderLegContent(fromSpot, toSpot) {
       <a class="leg-pill" href="${dirUrl}" target="_blank" rel="noopener" aria-label="用 Google 地圖導航：${mode.label}">
         ${ICONS[mode.value]}${pillText}${ICONS.external}
       </a>
+      ${detailsBtn}
       ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
     </div>
     <div class="leg-row">
       <button class="leg-mode-btn ${modesOpen ? 'on' : ''}" data-action="toggle-leg-modes" aria-expanded="${modesOpen}"
         title="交通方式：${mode.label}（點一下切換）" aria-label="交通方式：${mode.label}，點一下切換">${ICONS[mode.value]}</button>
       ${info}
+      ${detailsBtn}
       ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
       <a class="icon-btn leg-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener"
         title="在 Google 地圖查看路線" aria-label="在 Google 地圖查看路線">${ICONS.external}</a>
     </div>
-    ${modesOpen ? `<div class="segmented leg-modes" role="group" aria-label="這段的交通方式">${modeButtons}</div>` : ''}`;
+    ${modesOpen ? `<div class="segmented leg-modes" role="group" aria-label="這段的交通方式">${modeButtons}</div>` : ''}
+    ${detailsOpen ? renderTransitSteps(leg.transitSteps) : ''}`;
 }
 
 // 只更新交通欄位與每天的交通總時間，不動景點卡片
@@ -1245,6 +1357,20 @@ function handleAction(btn, spotId) {
       render();
       break;
     case 'toggle-mobile-panel': toggleMobilePanel(); break;
+    case 'toggle-icon-picker':
+      ui.spotMenuId = null;
+      ui.iconPickerSpotId = ui.iconPickerSpotId === spotId ? null : spotId;
+      render();
+      document.querySelector('.icon-picker [aria-checked="true"]')?.focus();
+      break;
+    case 'set-spot-icon': setSpotIcon(spotId, btn.dataset.icon); break;
+    case 'toggle-leg-details': {
+      const leg = btn.closest('.leg');
+      const key = `${leg.dataset.from}->${leg.dataset.to}`;
+      ui.legDetailsKey = ui.legDetailsKey === key ? null : key;
+      updateLegViews();
+      break;
+    }
     case 'add-day': addDay(); break;
     case 'remove-day': removeDay(btn.dataset.dayId); break;
     case 'move-up': moveSpotBy(spotId, -1); break;
@@ -1309,10 +1435,20 @@ document.addEventListener('click', e => {
     ui.spotMenuId = null;
     render();
   }
+  if (ui.iconPickerSpotId && !e.target.closest('.icon-picker, [data-action="toggle-icon-picker"]')) {
+    ui.iconPickerSpotId = null;
+    render();
+  }
   if (!e.target.closest('#nav-menu, [data-action="toggle-nav-menu"]')) closeNavMenu();
 });
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if (ui.iconPickerSpotId) {
+    const id = ui.iconPickerSpotId;
+    ui.iconPickerSpotId = null;
+    render();
+    document.querySelector(`.spot[data-spot-id="${id}"] .spot-index`)?.focus();
+  }
   if (ui.spotMenuId) {
     const id = ui.spotMenuId;
     ui.spotMenuId = null;
@@ -1951,10 +2087,11 @@ function selectRecentPlace(place) {
   openAddSpotForm({ lat: place.lat, lng: place.lng }, place.id, place.name);
 }
 
-function createPinElement(dayIndex, spotIndex, dimmed) {
+// 有自訂圖示時圖釘顯示圖示，否則顯示「天數-順序」
+function createPinElement(dayIndex, spotIndex, dimmed, icon) {
   const wrap = document.createElement('div');
   wrap.className = `pin-wrap${dimmed ? ' dimmed' : ''}`;
-  wrap.innerHTML = `<div class="pin" style="--c:${getDayColor(dayIndex)}"><span>${dayIndex + 1}-${spotIndex + 1}</span></div>`;
+  wrap.innerHTML = `<div class="pin" style="--c:${getDayColor(dayIndex)}"><span class="${icon ? 'pin-emoji' : ''}">${icon || `${dayIndex + 1}-${spotIndex + 1}`}</span></div>`;
   return wrap;
 }
 
@@ -1980,7 +2117,7 @@ function syncMarkers() {
         marker.addListener('gmp-click', () => onMarkerClick(spot.id));
         markers.set(spot.id, marker);
       }
-      marker.content = createPinElement(dayIndex, index, dimmed);
+      marker.content = createPinElement(dayIndex, index, dimmed, spot.icon);
       marker.title = getMarkerTitle({ dayIndex, spot });
       marker.zIndex = dimmed ? 1 : 10;
     });
@@ -2264,7 +2401,7 @@ function renderNextStop() {
   const travel = renderDayTravel(day);
   el.dataset.spotId = spot.id;
   el.innerHTML = `
-    <span class="spot-index">1</span>
+    <span class="spot-index ${spot.icon ? 'has-icon' : ''}">${spot.icon || 1}</span>
     <span class="next-text">
       <span class="next-label">下一站・${getDayLabel(dayIndex)}${getDayDateText(dayIndex) ? ` ${getDayDateText(dayIndex)}` : ''}</span>
       <span class="next-name">${escapeHtml(spot.name)}</span>
@@ -2371,6 +2508,10 @@ function placeForViewport() {
   if (searchInput.placeholder === searchInput.dataset.placeholder || searchInput.placeholder === '搜尋') {
     searchInput.placeholder = mobile ? '搜尋' : searchInput.dataset.placeholder;
   }
+  // 搜尋框：桌面版浮在地圖左上角，手機版放在浮動導覽列中間
+  const searchBox = document.querySelector('.search');
+  if (mobile) document.querySelector('.brand').after(searchBox);
+  else document.querySelector('.map-wrap').prepend(searchBox);
   if (mobile) {
     panel.append(members, navWrap);
     document.querySelector('.sidebar-header').prepend(tripSub);

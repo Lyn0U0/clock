@@ -170,7 +170,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .topbar {
   flex-shrink: 0;
   display: grid;
-  grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 24px;
   padding: 10px 20px;
@@ -235,6 +235,15 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 
 /* 搜尋 */
 .search { position: relative; justify-self: center; width: min(520px, 100%); }
+/* 桌面版：搜尋框浮在地圖左上角 */
+.map-wrap > .search {
+  position: absolute;
+  top: 28px; left: 20px;
+  z-index: 560;
+  width: min(380px, calc(100% - 280px));
+}
+.map-wrap > .search input { border: var(--line-strong); box-shadow: var(--shadow-cta); }
+.map-wrap > .search input:focus { background: var(--paper); box-shadow: var(--shadow-pop); }
 .search > svg { position: absolute; top: 50%; left: 15px; width: 17px; height: 17px; transform: translateY(-50%); color: var(--muted); pointer-events: none; transition: color .15s; }
 .search input {
   width: 100%;
@@ -560,6 +569,10 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .drag-handle svg { fill: currentColor; stroke: none; }
 .spot-index {
   flex-shrink: 0;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  color: var(--ink);
   width: 26px; height: 26px;
   border-radius: 50%;
   background: var(--c);
@@ -570,6 +583,32 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   place-items: center;
   font-variant-numeric: tabular-nums;
 }
+button.spot-index { cursor: pointer; transition: transform .1s; }
+button.spot-index:hover { transform: scale(1.12); }
+.spot-index.has-icon { font-size: 15px; background: color-mix(in srgb, var(--c) 35%, var(--paper)); }
+.icon-picker {
+  top: 46px; left: 20px;
+  width: 248px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.icon-picker button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 2px 6px;
+  border: 1.5px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  cursor: pointer;
+}
+.icon-picker button:hover, .icon-picker button:focus-visible { background: var(--surface); outline: none; }
+.icon-picker button[aria-checked="true"] { border-color: var(--ink); background: var(--primary-soft); }
+.ip-emoji { display: grid; place-items: center; width: 30px; height: 30px; font-size: 20px; font-weight: 900; line-height: 1; }
+.ip-label { font-size: 10px; font-weight: 700; color: var(--ink-2); white-space: nowrap; }
+.pin span.pin-emoji { font-size: 15px; }
 .spot-info {
   flex: 1;
   min-width: 0;
@@ -726,6 +765,50 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 .leg-info.error { color: var(--danger); font-weight: 700; white-space: normal; }
 .leg-link { width: 26px; height: 26px; }
 .leg-link svg { width: 13px; height: 13px; }
+
+/* 大眾運輸：展開按鈕與轉乘時間軸 */
+.leg-info.as-btn { border: none; background: transparent; padding: 4px 6px; margin: -4px -6px; border-radius: var(--r-sm); cursor: pointer; color: inherit; }
+.leg-info.as-btn:hover { background: var(--surface); }
+.leg-details-btn { width: 26px; height: 26px; font-size: 10px; }
+.transit-steps {
+  list-style: none;
+  margin: 4px 0 8px 0;
+  padding: 10px 12px 10px 10px;
+  border: var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+}
+.ts { position: relative; display: flex; gap: 10px; align-items: flex-start; }
+/* 直向子時間軸：圓點之間以線相連，步行段用虛線 */
+.ts:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 11px; top: 26px; bottom: -12px;
+  border-left: 2px solid var(--ink);
+}
+.ts-walk:not(:last-child)::after { border-left-style: dashed; border-left-color: var(--edge-strong); }
+.ts-dot {
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  width: 24px; height: 24px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+}
+.ts-ride .ts-dot { background: var(--ink); color: var(--paper); }
+.ts-dot svg { width: 13px; height: 13px; }
+.ts-main { flex: 1; min-width: 0; font-size: 12px; font-weight: 700; line-height: 1.5; padding-top: 2px; }
+.ts-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.ts-vehicle { font-size: 11px; font-weight: 900; color: var(--muted); }
+.ts-line { padding: 0 8px; border: 1.5px solid var(--ink); border-radius: 999px; background: var(--primary-soft); font-size: 12px; font-weight: 900; }
+.ts-stops { font-size: 13px; font-weight: 900; }
+.ts-arrow { margin: 0 6px; color: var(--muted); }
+.ts-sub { font-size: 11px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* 分段切換（交通方式） */
 .segmented {
@@ -1344,6 +1427,9 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   .leg-row, .leg-modes { display: none; }
   .leg-mobile { display: flex; align-items: center; gap: 8px; }
   .leg-mobile .expense-badge:not(.has):not(.on) { display: none; }
+  .leg-details-btn { width: 44px; height: 44px; font-size: 12px; }
+  .icon-picker { left: 8px; width: min(300px, calc(100vw - 48px)); }
+  .icon-picker button { min-height: 60px; }
   .leg-pill {
     display: inline-flex;
     align-items: center;
