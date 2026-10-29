@@ -2,7 +2,7 @@
  * 旅遊行程規劃：新野獸派 × 復古貼紙風
  * 版面：頂部導覽列（品牌｜搜尋膠囊｜旅伴＋結算）＋ 左側行程欄 ＋ 右側黑框地圖
  * 規則：所有卡片與按鈕都是純黑實線邊框 + 硬陰影；按下時往右下平移、陰影歸零；
- *       狀態與花費標籤做成微傾斜的手帳貼紙（傾斜角度用 --tilt 控制）；天數分頁與行程清單內保持水平。
+ *       狀態與花費標籤做成黑框純色的手帳貼紙，全部保持水平（需要傾斜時可設定 --tilt）。
  * ========================================================================== */
 :root {
   /* 底色與墨色 */
@@ -108,7 +108,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   border-radius: 12px;
   background: var(--yellow);
   box-shadow: var(--shadow-btn);
-  transform: rotate(-6deg);
 }
 .brand-mark svg { width: 22px; height: 22px; stroke-width: 2.4; }
 .brand h1 { margin: 0; font-size: 22px; font-weight: 900; letter-spacing: .02em; white-space: nowrap; }
@@ -222,7 +221,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   white-space: nowrap;
 }
 .settle-btn-total {
-  --tilt: 3deg;
   padding: 4px 10px;
   background: var(--ink);
   color: var(--paper);
@@ -352,8 +350,8 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
 }
 .day-dot { width: 14px; height: 14px; border: var(--line); border-radius: 50%; background: var(--c); }
 .day-title { margin: 0; font-size: 19px; font-weight: 900; }
-.day-count { --tilt: -3deg; padding: 2px 8px; background: var(--paper); font-size: 11px; font-variant-numeric: tabular-nums; }
-.day-travel { --tilt: 2deg; padding: 2px 8px; background: var(--mint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.day-count { padding: 2px 8px; background: var(--paper); font-size: 11px; font-variant-numeric: tabular-nums; }
+.day-travel { padding: 2px 8px; background: var(--mint); font-size: 11px; font-variant-numeric: tabular-nums; }
 .day-travel:empty { display: none; }
 .day-head .btn-text { margin-left: auto; }
 .day-empty { margin: 0; padding: 22px 14px; font-size: 13px; font-weight: 700; color: var(--muted); text-align: center; }
@@ -762,7 +760,7 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   background: var(--mint);
   box-shadow: var(--shadow-card);
 }
-.settle-eyebrow { --tilt: -3deg; padding: 3px 12px; margin-bottom: 12px; background: var(--ink); color: var(--paper); font-size: 12px; letter-spacing: .08em; }
+.settle-eyebrow { padding: 3px 12px; margin-bottom: 12px; background: var(--ink); color: var(--paper); font-size: 12px; letter-spacing: .08em; }
 .verdict-main { margin: 0; font-size: 19px; font-weight: 700; line-height: 1.6; text-wrap: balance; }
 .verdict-main strong { font-weight: 900; }
 .verdict-main + .verdict-main { margin-top: 10px; }
@@ -776,7 +774,6 @@ svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width:
   box-shadow: var(--shadow-btn);
   font-size: 34px;
   font-weight: 900;
-  transform: rotate(-1.5deg);
   font-variant-numeric: tabular-nums;
 }
 .verdict-sub { margin: 14px 0 0; font-size: 13px; font-weight: 700; }
