@@ -3265,15 +3265,17 @@ async function runExport(kind) {
   try {
     await ensureAllLegs();
     if (kind === 'html') {
-      downloadFile(buildOfflineHtml(), getExportFileName('html'), 'text/html;charset=utf-8');
+      await downloadFile(buildOfflineHtml(), getExportFileName('html'), 'text/html;charset=utf-8');
       setExportStatus('已下載 HTML 離線手帳，用瀏覽器打開就能離線閱讀');
     } else if (kind === 'json') {
-      downloadFile(JSON.stringify(buildExportData(), null, 2), getExportFileName('json'), 'application/json');
+      await downloadFile(JSON.stringify(buildExportData(), null, 2), getExportFileName('json'), 'application/json');
       setExportStatus('已下載 JSON 備份，之後可以從設定選單「匯入 JSON 備份」還原');
     } else if (kind === 'pdf') {
       printHandbook();
       setExportStatus('已開啟列印視窗：目的地選「另存為 PDF」，紙張 A4 直式');
     }
+  } catch (err) {
+    setExportStatus(err?.code === 'declined' ? '已取消下載' : '下載失敗，請再試一次');
   } finally {
     buttons.forEach(b => { b.disabled = false; });
   }
