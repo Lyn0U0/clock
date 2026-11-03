@@ -67,6 +67,20 @@ const FIREBASE_CONFIG = {
 
 `firebaseConfig` 本來就會公開在網頁上，放進公開的 repo 沒有關係，資料安全靠的是上面的安全規則。
 
+### 4. 設定 30 天自動刪除（TTL）
+
+共享行程在雲端只保留 30 天。網站建立共享行程時，會在行程和每筆花費都寫入到期時間 `expireAt`；
+要讓 Firestore 依這個欄位自動刪除，請建立兩條 TTL 規則：
+
+1. Firebase 主控台 →「Firestore Database」→「TTL」分頁（或 Google Cloud Console 的 Firestore「存留時間」）。
+2. 新增規則：集合群組 `trips`，時間戳記欄位 `expireAt`。
+3. 再新增一條：集合群組 `expenses`，時間戳記欄位 `expireAt`。
+
+到期後 Firestore 通常會在 24 小時內刪除資料。網站導覽列會顯示「⏳ 雲端保存剩餘 X 天」，剩 3 天內會變成紅色提醒。
+旅程最後一天過後，網站會提醒下載保存：HTML 離線手帳、PDF 手冊或 JSON 備份（JSON 可從設定選單「匯入 JSON 備份」還原）。
+
+在加上這個功能之前建立的共享行程，下次打開時會依建立時間補上 `expireAt`。
+
 ### 使用方式
 
 - 按「建立共享連結」：目前的行程會複製一份到雲端，網址變成 `…/trip-planner/#trip-<id>`。原本的個人行程不會變動。

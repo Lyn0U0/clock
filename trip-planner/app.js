@@ -48,6 +48,7 @@ const TRAVEL_MODES = [
 ];
 const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }];
 const MIN_MEMBERS = 1;
+const CLOUD_RETENTION_DAYS = 30; // 共享行程在雲端保留的天數（Firestore TTL 依 expireAt 刪除）
 // 景點圖示：value 空字串代表顯示當天的順序編號
 const SPOT_ICONS = [
   { value: '', label: '編號' },
@@ -728,18 +729,29 @@ function renderTransitSteps(steps) {
 // 計算畫面上所有還沒算過的 Leg（每次 render 後呼叫）
 function refreshVisibleLegs() {
   if (!apiKey) return;
-  getVisibleDays().forEach(day => {
-    getDayLegs(day).forEach(({ from, to }) => {
-      const mode = getLegMode(from, to).value;
-      const key = getLegKey(from, to, mode);
-      if (legCache.has(key)) return;
-      legCache.set(key, { status: 'loading' });
-      fetchLegRoute(from, to, mode).then(result => {
-        legCache.set(key, result);
-        updateLegViews();
-      });
-    });
+  getVisibleDays().forEach(day => getDayLegs(day).forEach(({ from, to }) => requestLeg(from, to)));
+}
+
+// 取得一段路的交通資料；已算過或正在算就沿用，回傳 Promise 方便匯出時等全部算完
+function requestLeg(from, to) {
+  const mode = getLegMode(from, to).value;
+  const key = getLegKey(from, to, mode);
+  const cached = legCache.get(key);
+  if (cached) return cached.promise || Promise.resolve(cached);
+  const promise = fetchLegRoute(from, to, mode).then(result => {
+    legCache.set(key, result);
+    updateLegViews();
+    return result;
   });
+  legCache.set(key, { status: 'loading', promise });
+  return promise;
+}
+
+// 匯出前把所有天數的路段都算完（最多等 20 秒，網路不通也不會卡住）
+function ensureAllLegs() {
+  if (!apiKey) return Promise.resolve();
+  const all = Promise.all(state.days.flatMap(day => getDayLegs(day).map(({ from, to }) => requestLeg(from, to))));
+  return Promise.race([all, new Promise(resolve => setTimeout(resolve, 20000))]);
 }
 
 function retryLeg(fromId, toId) {
@@ -871,6 +883,8 @@ function escapeHtml(str) {
 
 function render() {
   renderTripHeader();
+  renderCloudTtl();
+  renderTripEnded();
   renderSummary();
   renderMembers();
   renderSyncBar();
@@ -1357,6 +1371,8 @@ function handleAction(btn, spotId) {
       render();
       break;
     case 'toggle-mobile-panel': toggleMobilePanel(); break;
+    case 'open-export': closeNavMenu(); toggleMobilePanel(false); setExportOpen(true); break;
+    case 'import-json': closeNavMenu(); importInput.click(); break;
     case 'toggle-icon-picker':
       ui.spotMenuId = null;
       ui.iconPickerSpotId = ui.iconPickerSpotId === spotId ? null : spotId;
@@ -2512,13 +2528,16 @@ function placeForViewport() {
   const searchBox = document.querySelector('.search');
   if (mobile) document.querySelector('.brand').after(searchBox);
   else document.querySelector('.map-wrap').prepend(searchBox);
+  const saveTools = document.getElementById('save-tools');
   if (mobile) {
+    panel.prepend(saveTools);
     panel.append(members, navWrap);
     document.querySelector('.sidebar-header').prepend(tripSub);
     document.getElementById('nav-menu').hidden = false;
   } else {
     const right = document.querySelector('.topbar-right');
     right.prepend(members);
+    right.prepend(saveTools);
     right.append(navWrap);
     document.querySelector('.trip-meta').append(tripSub);
     document.getElementById('nav-menu').hidden = true;
@@ -2554,7 +2573,9 @@ const sync = {
   lastTripJson: '',
   baseTrip: null,            // 上次和雲端一致的行程本體，合併時用來判斷哪邊有修改
   syncedExpenses: new Map(), // expenseId -> 雲端目前內容（stableStringify）
-  copiedTimer: null
+  copiedTimer: null,
+  expireAt: null,            // 雲端資料到期日（Date）
+  needsExpiryBackfill: false // 舊的共享行程沒有 expireAt，載入後補上
 };
 
 function isSyncReady() {
@@ -2639,7 +2660,7 @@ async function flushCloudSave() {
   current.forEach((expense, id) => {
     const json = stableStringify(expense);
     if (sync.syncedExpenses.get(id) === json) return;
-    batch.set(expensesRef.doc(id), expense);
+    batch.set(expensesRef.doc(id), withExpiry(expense));
     sync.syncedExpenses.set(id, json);
     writes++;
   });
@@ -2693,7 +2714,16 @@ function onTripSnapshot(doc) {
     return;
   }
   if (doc.metadata.hasPendingWrites) return; // 自己剛寫入的變動，畫面早就是最新的
-  const remote = pickTripData(doc.data());
+  const data = doc.data();
+  const expireAt = data.expireAt?.toDate?.();
+  if (expireAt) {
+    sync.expireAt = expireAt;
+  } else if (!sync.expireAt) {
+    // 舊的共享行程：以建立時間起算 30 天，並補寫 expireAt 讓 TTL 生效
+    sync.expireAt = addDaysToDate(data.createdAt?.toDate?.() || new Date(), CLOUD_RETENTION_DAYS);
+    sync.needsExpiryBackfill = true;
+  }
+  const remote = pickTripData(data);
   if (!Array.isArray(remote.days) || !remote.days.length || !Array.isArray(remote.members)) return;
   const remoteJson = stableStringify(remote);
   // 第一次載入以雲端為準；之後和本機還沒上傳的修改合併
@@ -2770,6 +2800,7 @@ function onExpensesSnapshot(snap) {
     state.expenses = snap.docs.map(d => pickExpense({ ...d.data(), id: d.id }));
     sync.syncedExpenses = new Map(state.expenses.map(x => [x.id, stableStringify(x)]));
     sync.loaded.expenses = true;
+    if (sync.needsExpiryBackfill) backfillExpiry(snap.docs.map(d => d.ref));
     applyRemoteChange();
     return;
   }
@@ -2831,6 +2862,30 @@ window.addEventListener('hashchange', () => {
 });
 
 // ---------- 建立 / 離開共享行程 ----------
+function addDaysToDate(date, days) {
+  return new Date(date.getTime() + days * 86400000);
+}
+
+// 寫進雲端的資料都帶上 expireAt，Firestore TTL 到期會自動刪除
+function withExpiry(data) {
+  return sync.expireAt ? { ...data, expireAt: firebase.firestore.Timestamp.fromDate(sync.expireAt) } : data;
+}
+
+function backfillExpiry(expenseRefs) {
+  sync.needsExpiryBackfill = false;
+  const batch = sync.db.batch();
+  const expireAt = firebase.firestore.Timestamp.fromDate(sync.expireAt);
+  batch.set(sync.tripRef, { expireAt }, { merge: true });
+  expenseRefs.forEach(ref => batch.set(ref, { expireAt }, { merge: true }));
+  batch.commit().catch(err => console.warn('Firestore expiry backfill:', err));
+}
+
+// 雲端保存剩餘天數；不是共享行程時回傳 null
+function getCloudDaysLeft() {
+  if (!sharedTripId || !sync.expireAt) return null;
+  return Math.max(0, Math.ceil((sync.expireAt - Date.now()) / 86400000));
+}
+
 async function startSharing() {
   if (!FIREBASE_CONFIG || sharedTripId) return;
   setSyncStatus('connecting', '正在建立共享行程…');
@@ -2839,8 +2894,9 @@ async function startSharing() {
     const tripRef = db.collection('trips').doc();
     const batch = db.batch();
     const now = firebase.firestore.FieldValue.serverTimestamp();
-    batch.set(tripRef, { ...pickTripData(state), createdAt: now, updatedAt: now });
-    state.expenses.filter(x => x.amount > 0).forEach(x => batch.set(tripRef.collection('expenses').doc(x.id), pickExpense(x)));
+    sync.expireAt = addDaysToDate(new Date(), CLOUD_RETENTION_DAYS);
+    batch.set(tripRef, withExpiry({ ...pickTripData(state), createdAt: now, updatedAt: now }));
+    state.expenses.filter(x => x.amount > 0).forEach(x => batch.set(tripRef.collection('expenses').doc(x.id), withExpiry(pickExpense(x))));
     await batch.commit();
     // 目前的個人行程複製一份成為共享行程，個人行程保持原樣
     localStorage.setItem(`${STATE_STORAGE}:trip-${tripRef.id}`, JSON.stringify(state));
@@ -2877,6 +2933,7 @@ function renderSyncBar() {
   const indicator = document.getElementById('sync-indicator');
   indicator.hidden = !sharedTripId;
   indicator.className = `sync-indicator ${sync.status}`;
+  renderCloudTtl(); // 雲端到期日在第一次載入後才知道
   document.getElementById('avatar-btn').dataset.sync = sharedTripId ? sync.status : ''; // 手機版顯示在旅伴頭像上
   if (!sharedTripId) {
     el.className = 'sync-bar local';
@@ -2902,6 +2959,405 @@ function renderSyncBar() {
     <button class="sync-btn primary" data-action="copy-link">複製連結</button>
     <button class="sync-btn" data-action="leave-trip">離開</button>`;
 }
+
+
+/* ==========================================================================
+ * 9b. 雲端保存期限與下載保存
+ *
+ *   - 共享行程的雲端資料保留 30 天：導覽列顯示「⏳ 雲端保存剩餘 X 天」，剩 3 天內改成珊瑚紅提醒。
+ *   - 旅程最後一天過後，頂端出現提醒卡片，引導下載保存（可以關掉，每趟旅程只問一次）。
+ *   - 「💾 結束並下載旅程」：HTML 離線手帳、PDF（列印成 A4）、JSON 原始資料（可再匯入）。
+ *     三種格式都用 buildHandbook() 產生同一份內容：每日行程、圖示與備註、交通與轉乘、記帳與結算。
+ * ========================================================================== */
+
+const MODE_EMOJI = { DRIVE: '🚗', TWO_WHEELER: '🛵', TRANSIT: '🚆', WALK: '🚶' };
+const ENDED_DISMISS_STORAGE = 'trip-planner-ended-dismissed';
+
+function renderCloudTtl() {
+  const el = document.getElementById('cloud-ttl');
+  const days = getCloudDaysLeft();
+  el.hidden = days === null;
+  if (days === null) return;
+  el.classList.toggle('urgent', days <= 3);
+  el.textContent = days > 0 ? `⏳ 雲端保存剩餘 ${days} 天` : '⏳ 雲端資料今天到期';
+  el.title = `共享行程會在 ${sync.expireAt?.toLocaleDateString('zh-TW') || ''} 從雲端刪除，請在那之前下載保存`;
+}
+
+function getTripEndDate() {
+  return state.startDate ? getDayDate(state.days.length - 1) : null;
+}
+
+function isTripEnded() {
+  const end = getTripEndDate();
+  if (!end) return false;
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()) > end;
+}
+
+function getTripKey() {
+  return sharedTripId ? `trip-${sharedTripId}` : `local-${state.startDate}`;
+}
+
+function isEndedDismissed() {
+  try {
+    return JSON.parse(localStorage.getItem(ENDED_DISMISS_STORAGE) || '[]').includes(getTripKey());
+  } catch {
+    return false;
+  }
+}
+
+function dismissTripEnded() {
+  try {
+    const list = JSON.parse(localStorage.getItem(ENDED_DISMISS_STORAGE) || '[]');
+    localStorage.setItem(ENDED_DISMISS_STORAGE, JSON.stringify([...new Set([...list, getTripKey()])].slice(-50)));
+  } catch {}
+  renderTripEnded(true);
+}
+
+function renderTripEnded(forceHide = false) {
+  const el = document.getElementById('trip-ended');
+  const show = !forceHide && isTripEnded() && !isEndedDismissed();
+  el.hidden = !show;
+  if (!show) return;
+  const days = getCloudDaysLeft();
+  const name = state.tripName.trim() || DEFAULT_TRIP_NAME;
+  el.innerHTML = `
+    <span class="trip-ended-emoji" aria-hidden="true">🎒</span>
+    <div class="trip-ended-text">
+      <strong>「${escapeHtml(name)}」已經結束了，辛苦了！</strong>
+      <span>${days !== null ? `雲端資料會在 ${days} 天後刪除，` : ''}把 ${state.days.length} 天的行程與記帳下載保存，留作紀念吧。</span>
+    </div>
+    <button class="btn-primary" data-action="open-export">💾 下載保存</button>
+    <button class="icon-btn" data-action="dismiss-ended" aria-label="關閉提醒" title="關閉提醒">${ICONS.close}</button>`;
+}
+
+// ---------- 匯出內容 ----------
+function getLegExport(from, to) {
+  const mode = getLegMode(from, to);
+  const leg = legCache.get(getLegKey(from, to, mode.value));
+  const ok = leg?.status === 'ok';
+  return {
+    from: from.id,
+    to: to.id,
+    mode: mode.value,
+    modeLabel: mode.label,
+    durationSec: ok ? leg.durationSec : null,
+    distanceMeters: ok ? leg.distanceMeters : null,
+    description: ok ? leg.description : '',
+    transitSteps: ok ? leg.transitSteps || [] : []
+  };
+}
+
+function getMemberNameById(id) {
+  return getMemberName(getMember(id));
+}
+
+function buildExportData() {
+  const legs = state.days.flatMap(day => getDayLegs(day).map(({ from, to }) => getLegExport(from, to)));
+  const r = computeSettlement();
+  return {
+    format: 'trip-planner-backup',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    trip: {
+      tripName: state.tripName,
+      startDate: state.startDate,
+      days: state.days,
+      members: state.members,
+      travelMode: state.travelMode,
+      legModes: state.legModes || {},
+      expenses: state.expenses.filter(x => x.amount > 0)
+    },
+    legs,
+    settlement: {
+      total: r.total,
+      sharedTotal: r.sharedTotal,
+      personalTotal: r.personalTotal,
+      members: r.rows.map(row => ({ name: getMemberName(row.member), paid: row.paid, share: row.share, net: row.net, personal: row.personal })),
+      transfers: r.transfers.map(t => ({ from: getMemberName(t.from), to: getMemberName(t.to), amount: t.amount }))
+    }
+  };
+}
+
+function renderHandbookExpenses(ref) {
+  const items = getExpensesFor(ref).filter(x => x.amount > 0);
+  if (!items.length) return '';
+  return `<ul class="hb-expenses">${items.map(x => `
+      <li><span>${escapeHtml(x.title || '花費')}</span><span class="hb-who">${escapeHtml(getMemberNameById(x.paidBy))} 付・${x.split === 'shared' ? getSharedLabel() : '個人自付'}</span><strong>${formatMoney(x.amount)}</strong></li>`).join('')}</ul>`;
+}
+
+function renderHandbookLeg(from, to, print) {
+  const leg = getLegExport(from, to);
+  const time = leg.durationSec !== null ? `${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}` : '交通時間未計算';
+  const steps = leg.transitSteps.length ? `
+      <details class="hb-transit" ${print ? 'open' : ''}>
+        <summary>轉乘細節</summary>
+        <ol>${leg.transitSteps.map(step => step.type === 'walk'
+          ? `<li class="hb-walk">🚶 步行 ${formatDuration(step.sec)}（${formatDistance(step.meters)}）</li>`
+          : `<li class="hb-ride"><span class="hb-line">${escapeHtml(step.vehicle)} ${escapeHtml(step.line)}${step.trip ? ` 車次 ${escapeHtml(step.trip)}` : ''}</span>
+              ${escapeHtml(step.from)} ➔ ${escapeHtml(step.to)}<small>${[step.departTime && `${escapeHtml(step.departTime)} 上車`, step.stops && `${step.stops} 站`, formatDuration(step.sec)].filter(Boolean).join('・')}</small></li>`).join('')}
+        </ol>
+      </details>` : '';
+  return `<li class="hb-leg"><span class="hb-leg-mode">${MODE_EMOJI[leg.mode] || '🚌'} ${leg.modeLabel}</span><span class="hb-leg-time">${time}</span>${steps}
+      ${renderHandbookExpenses(getLegRef(from, to))}</li>`;
+}
+
+// 產生旅行手帳（HTML 離線檔與 PDF 共用）；print 為 true 時轉乘細節全部展開
+function buildHandbook({ print = false } = {}) {
+  const r = computeSettlement();
+  const name = state.tripName.trim() || DEFAULT_TRIP_NAME;
+  const range = state.startDate ? `${getDayDateText(0)} – ${getDayDateText(state.days.length - 1)}` : '未設定日期';
+  const members = state.members.map(getMemberName).join('、');
+  const days = state.days.map((day, i) => {
+    const date = getDayDateText(i);
+    const travel = renderDayTravel(day);
+    const items = day.spots.map((spot, j) => {
+      const next = day.spots[j + 1];
+      const card = `<li class="hb-spot">
+          <span class="hb-icon" style="background:${getDayColor(i)}">${spot.icon || j + 1}</span>
+          <div class="hb-spot-body">
+            <h3>${escapeHtml(spot.name)}</h3>
+            ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim()).replace(/\n/g, '<br>')}</p>` : ''}
+            ${renderHandbookExpenses(getSpotRef(spot))}
+          </div>
+        </li>`;
+      return next ? card + renderHandbookLeg(spot, next, print) : card;
+    }).join('');
+    return `<section class="hb-day" id="day-${i + 1}" style="--c:${getDayColor(i)}">
+        <h2><span class="hb-dot"></span>${getDayLabel(i)}${date ? `<small>${date}</small>` : ''}</h2>
+        <p class="hb-day-sum">${day.spots.length} 個景點${travel ? `・${travel}` : ''}</p>
+        ${day.spots.length ? `<ol class="hb-timeline">${items}</ol>` : '<p class="hb-empty">這天沒有安排景點</p>'}
+      </section>`;
+  }).join('');
+  const verdict = !r.count
+    ? '沒有記錄花費'
+    : r.transfers.length
+      ? r.transfers.map(t => `<p><strong>${escapeHtml(getMemberName(t.from))}</strong> 需轉帳給 <strong>${escapeHtml(getMemberName(t.to))}</strong> <span class="hb-amount">${formatMoney(t.amount)}</span></p>`).join('')
+      : `<p>${state.members.length === 1 ? '只有一位旅伴，不需要轉帳' : '帳目已平衡，不需要轉帳'}</p>`;
+  const rows = r.rows.map(row => `<tr><th>${escapeHtml(getMemberName(row.member))}</th><td>${formatMoney(row.paid)}</td><td>${formatMoney(row.share)}</td>
+      <td class="${row.net > 0.5 ? 'plus' : row.net < -0.5 ? 'minus' : ''}">${row.net > 0.5 ? `應收 ${formatMoney(row.net)}` : row.net < -0.5 ? `應付 ${formatMoney(-row.net)}` : '已結清'}</td><td>${formatMoney(row.personal)}</td></tr>`).join('');
+  const toc = state.days.map((d, i) => `<a href="#day-${i + 1}">${getDayLabel(i)}${getDayDateText(i, false) ? ` ${getDayDateText(i, false)}` : ''}</a>`).join('');
+  return `
+    <header class="hb-cover">
+      <p class="hb-eyebrow">旅行手帳</p>
+      <h1>${escapeHtml(name)}</h1>
+      <p class="hb-meta">${range}・${state.days.length} 天・${countSpots()} 個景點</p>
+      <p class="hb-meta">旅伴：${escapeHtml(members)}</p>
+      <nav class="hb-toc">${toc}<a href="#settle">旅費結算</a></nav>
+    </header>
+    ${days}
+    <section class="hb-settle" id="settle">
+      <h2>💰 旅費結算</h2>
+      <div class="hb-verdict"><p class="hb-eyebrow">結算建議</p>${verdict}</div>
+      <p class="hb-total">全程總支出 <strong>${formatMoney(r.total)}</strong></p>
+      <p class="hb-meta">${getSharedLabel()}公費 ${formatMoney(r.sharedTotal)}・個人自付 ${formatMoney(r.personalTotal)}・景點 ${formatMoney(r.spotTotal)}・交通 ${formatMoney(r.legTotal)}</p>
+      <table class="hb-table"><thead><tr><th>旅伴</th><th>代墊公費</th><th>應負擔</th><th>淨額</th><th>個人自付</th></tr></thead><tbody>${rows}</tbody></table>
+    </section>
+    <footer class="hb-foot">由旅遊行程規劃匯出・${new Date().toLocaleString('zh-TW')}</footer>`;
+}
+
+const HANDBOOK_CSS = `
+.hb { --ink:#18181B; --muted:#6F685F; --edge:#D8D0C0; --paper:#FFFFFF; --bg:#FAF6EE; --yellow:#FDE047; --yellow-soft:#FEF9C3;
+  font-family:"Noto Sans TC",system-ui,-apple-system,"Segoe UI",sans-serif; color:var(--ink); background:var(--bg); line-height:1.6; }
+.hb * { box-sizing:border-box; }
+.hb-page { max-width:760px; margin:0 auto; padding:32px 20px 56px; display:flex; flex-direction:column; gap:20px; }
+.hb h1 { margin:4px 0 6px; font-size:30px; font-weight:900; text-wrap:balance; }
+.hb h2 { display:flex; align-items:baseline; gap:10px; margin:0; font-size:20px; font-weight:900; }
+.hb h2 small { font-size:14px; font-weight:700; color:var(--muted); }
+.hb h3 { margin:0; font-size:15px; font-weight:900; }
+.hb-eyebrow { display:inline-block; margin:0; padding:2px 10px; border-radius:999px; background:var(--ink); color:var(--paper); font-size:12px; font-weight:900; letter-spacing:.08em; }
+.hb-meta { margin:2px 0 0; font-size:13px; color:var(--muted); font-weight:500; }
+.hb-cover, .hb-day, .hb-settle { padding:20px; border:2px solid var(--ink); border-radius:16px; background:var(--paper); }
+.hb-cover { background:var(--yellow-soft); box-shadow:4px 4px 0 var(--ink); }
+.hb-toc { display:flex; flex-wrap:wrap; gap:6px; margin-top:14px; }
+.hb-toc a { padding:3px 12px; border:1.5px solid var(--ink); border-radius:999px; background:var(--paper); color:var(--ink); font-size:12px; font-weight:700; text-decoration:none; }
+.hb-dot { width:12px; height:12px; border-radius:50%; background:var(--c); box-shadow:0 0 0 1.5px var(--ink); flex-shrink:0; align-self:center; }
+.hb-day-sum { margin:2px 0 12px 22px; font-size:12px; color:var(--muted); font-weight:700; }
+.hb-timeline { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
+.hb-spot { display:flex; gap:12px; padding:10px 12px; border:1.5px solid var(--edge); border-radius:12px; break-inside:avoid; }
+.hb-icon { flex-shrink:0; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--ink); font-size:14px; font-weight:900; }
+.hb-spot-body { flex:1; min-width:0; }
+.hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; }
+.hb-leg { margin-left:26px; padding:8px 0 8px 18px; border-left:2px dashed #A8A090; font-size:13px; break-inside:avoid; }
+.hb-leg-mode { font-weight:700; margin-right:8px; }
+.hb-leg-time { font-weight:900; }
+.hb-transit { margin-top:6px; }
+.hb-transit summary { cursor:pointer; font-size:12px; font-weight:700; color:var(--muted); }
+.hb-transit ol { list-style:none; margin:6px 0 0; padding:8px 10px; border:1.5px solid var(--ink); border-radius:10px; background:var(--paper); display:flex; flex-direction:column; gap:6px; }
+.hb-ride { font-weight:900; }
+.hb-ride small { display:block; font-size:11px; font-weight:500; color:var(--muted); }
+.hb-line { display:inline-block; margin-right:6px; padding:0 8px; border:1.5px solid var(--ink); border-radius:999px; background:var(--yellow-soft); font-size:12px; }
+.hb-walk { color:var(--muted); font-weight:500; }
+.hb-expenses { list-style:none; margin:6px 0 0; padding:0; font-size:12px; }
+.hb-expenses li { display:flex; gap:8px; align-items:baseline; padding:2px 0; border-top:1px dashed var(--edge); }
+.hb-expenses li span:first-child { flex:1; }
+.hb-who { color:var(--muted); }
+.hb-empty { margin:0; color:var(--muted); font-size:13px; }
+.hb-verdict { margin:12px 0; padding:14px 16px; border:2px solid var(--ink); border-radius:12px; background:var(--yellow-soft); }
+.hb-verdict p { margin:6px 0 0; font-size:16px; font-weight:700; }
+.hb-amount { display:inline-block; margin-left:6px; padding:0 10px; border:2px solid var(--ink); border-radius:10px; background:var(--yellow); font-weight:900; }
+.hb-total { margin:0; font-size:15px; }
+.hb-total strong { font-size:22px; font-weight:900; }
+.hb-table { width:100%; margin-top:12px; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.hb-table th, .hb-table td { padding:7px 6px; text-align:right; border-bottom:1px solid var(--edge); white-space:nowrap; }
+.hb-table th:first-child { text-align:left; }
+.hb-table thead th { font-size:11px; color:var(--muted); }
+.hb-table .plus { color:#15803D; font-weight:900; }
+.hb-table .minus { color:#E11D48; font-weight:900; }
+.hb-foot { text-align:center; font-size:11px; color:var(--muted); }
+@media (max-width:520px) { .hb-page { padding:16px 12px 40px; } .hb-cover, .hb-day, .hb-settle { padding:14px; } .hb-table { display:block; overflow-x:auto; } }
+@media print {
+  .hb { background:#fff; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+  .hb-page { max-width:none; padding:0; gap:12px; }
+  .hb-cover, .hb-day, .hb-settle { box-shadow:none; border-width:1.5px; padding:14px 16px; }
+  .hb-toc { display:none; }
+  .hb-day { break-inside:auto; }
+  .hb-settle { break-inside:avoid; }
+}`;
+
+// ---------- 下載 ----------
+function getExportFileName(ext) {
+  const name = (state.tripName.trim() || DEFAULT_TRIP_NAME).replace(/[\\/:*?"<>|]+/g, '');
+  return `${name}${state.startDate ? `-${state.startDate}` : ''}.${ext}`;
+}
+
+function downloadFile(content, fileName, type) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = fileName;
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+function buildOfflineHtml() {
+  const name = escapeHtml(state.tripName.trim() || DEFAULT_TRIP_NAME);
+  // 原始資料一併嵌入，日後可以從這個檔案取回 JSON
+  const data = JSON.stringify(buildExportData()).replace(/</g, '\\u003c');
+  return `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${name}・旅行手帳</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<style>html,body{margin:0;}${HANDBOOK_CSS}</style>
+</head>
+<body class="hb">
+<main class="hb-page">${buildHandbook()}</main>
+<script type="application/json" id="trip-data">${data}</script>
+</body>
+</html>`;
+}
+
+function setExportStatus(text) {
+  const el = document.getElementById('export-status');
+  el.hidden = !text;
+  el.textContent = text || '';
+}
+
+async function runExport(kind) {
+  const buttons = document.querySelectorAll('[data-export]');
+  buttons.forEach(b => { b.disabled = true; });
+  setExportStatus('整理交通與轉乘資料中…');
+  try {
+    await ensureAllLegs();
+    if (kind === 'html') {
+      downloadFile(buildOfflineHtml(), getExportFileName('html'), 'text/html;charset=utf-8');
+      setExportStatus('已下載 HTML 離線手帳，用瀏覽器打開就能離線閱讀');
+    } else if (kind === 'json') {
+      downloadFile(JSON.stringify(buildExportData(), null, 2), getExportFileName('json'), 'application/json');
+      setExportStatus('已下載 JSON 備份，之後可以從設定選單「匯入 JSON 備份」還原');
+    } else if (kind === 'pdf') {
+      printHandbook();
+      setExportStatus('已開啟列印視窗：目的地選「另存為 PDF」，紙張 A4 直式');
+    }
+  } finally {
+    buttons.forEach(b => { b.disabled = false; });
+  }
+}
+
+// PDF：把手帳放進 #print-root，列印時只印這一塊（見 styles.css 的 @media print）
+function printHandbook() {
+  if (!document.getElementById('handbook-style')) {
+    const style = document.createElement('style');
+    style.id = 'handbook-style';
+    style.textContent = HANDBOOK_CSS;
+    document.head.append(style);
+  }
+  const root = document.getElementById('print-root');
+  root.innerHTML = `<main class="hb hb-page">${buildHandbook({ print: true })}</main>`;
+  document.title = `${state.tripName.trim() || DEFAULT_TRIP_NAME}・旅行手帳`; // 存成 PDF 時的預設檔名
+  window.addEventListener('afterprint', () => {
+    root.innerHTML = '';
+    document.title = state.tripName.trim() || DEFAULT_TRIP_NAME;
+  }, { once: true });
+  window.print();
+}
+
+function setExportOpen(open) {
+  document.getElementById('export-modal').hidden = !open;
+  document.getElementById('export-backdrop').hidden = !open;
+  setExportStatus('');
+  if (open) {
+    const ended = isTripEnded();
+    document.getElementById('export-lead').textContent = ended
+      ? '旅程結束了！選一種方式把整趟旅程保存到自己的裝置。'
+      : '隨時都可以下載目前的行程與記帳，選一種格式：';
+    document.querySelector('#export-modal [data-export="html"]').focus();
+  }
+}
+
+document.getElementById('export-modal').addEventListener('click', e => {
+  const option = e.target.closest('[data-export]');
+  if (option) runExport(option.dataset.export);
+  if (e.target.closest('[data-action="close-export"]')) setExportOpen(false);
+});
+document.getElementById('export-backdrop').addEventListener('click', () => setExportOpen(false));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('export-modal').hidden) setExportOpen(false);
+});
+document.getElementById('trip-ended').addEventListener('click', e => {
+  if (e.target.closest('[data-action="open-export"]')) setExportOpen(true);
+  if (e.target.closest('[data-action="dismiss-ended"]')) dismissTripEnded();
+});
+
+// ---------- 匯入 JSON 備份 ----------
+const importInput = document.getElementById('import-file');
+importInput.addEventListener('change', async () => {
+  const file = importInput.files[0];
+  importInput.value = '';
+  if (!file) return;
+  let data;
+  try {
+    data = JSON.parse(await file.text());
+  } catch {
+    alert('這個檔案不是有效的 JSON。');
+    return;
+  }
+  const trip = data?.format === 'trip-planner-backup' ? data.trip : null;
+  if (!trip || !Array.isArray(trip.days) || !trip.days.length) {
+    alert('這不是旅遊行程規劃匯出的 JSON 備份。');
+    return;
+  }
+  const where = sharedTripId ? '共享行程（所有旅伴都會看到）' : '目前的行程';
+  if (!confirm(`用「${trip.tripName || DEFAULT_TRIP_NAME}」的備份取代${where}？\n目前的景點與記帳會被覆蓋。`)) return;
+  state = normalizeState({
+    tripName: trip.tripName || '',
+    startDate: trip.startDate || '',
+    days: trip.days,
+    members: trip.members,
+    travelMode: trip.travelMode,
+    legModes: trip.legModes || {},
+    expenses: Array.isArray(trip.expenses) ? trip.expenses : [],
+    activeDayId: OVERVIEW
+  });
+  ui.lastLiveRefs = new Set(); // 不要把舊行程的卡片當成被刪除而清掉花費
+  commit();
+  fitMapToSpots(state.days.flatMap(d => d.spots));
+});
 
 
 /* ==========================================================================
