@@ -49,7 +49,8 @@ const TRAVEL_MODES = [
 const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }];
 const MIN_MEMBERS = 1;
 const CLOUD_RETENTION_DAYS = 30; // 共享行程在雲端保留的天數（Firestore TTL 依 expireAt 刪除）
-// 景點圖示：value 空字串代表顯示當天的順序編號
+// 景點圖示：value 空字串代表顯示當天的順序編號。
+// value 沿用早期版本的 Emoji 當作代號（已存的行程、共享行程與備份都相容），畫面上改畫下方的 2D 貼紙 SVG。
 const SPOT_ICONS = [
   { value: '', label: '編號' },
   { value: '🏠', label: '住宿／起點' },
@@ -60,6 +61,53 @@ const SPOT_ICONS = [
   { value: '🏞️', label: '自然風景' },
   { value: '🛍️', label: '購物採買' }
 ];
+
+// 2D 扁平復古貼紙圖示（32×32，粗黑外框、高飽和配色）；外框色與線寬由 renderSpotIcon 的 <g> 統一設定
+const SPOT_ICON_ART = {
+  '🏠': `<rect x="8" y="14" width="16" height="13" fill="#FDE047"/>
+    <path d="M4.5 15.5 16 5l11.5 10.5z" fill="#F43F5E"/>
+    <rect x="10.5" y="17.5" width="4" height="4" fill="#BAE6FD"/>
+    <path d="M17.5 27v-7.5h4V27" fill="#FB923C"/>`,
+  '🍜': `<path d="M8.5 11.5 25 4.5M10.5 13.5 27 8" stroke-width="2.4"/>
+    <path d="M8 15.5c1.5-2.5 2.5 2.5 4 0s2.5 2.5 4 0 2.5 2.5 4 0 2.5 2.5 4 0"/>
+    <path d="M4.5 15.5h23c0 6.5-5 11.5-11.5 11.5S4.5 22 4.5 15.5z" fill="#FDE047"/>
+    <path d="M7 20h18" stroke="#F43F5E" stroke-width="2.2"/>`,
+  '🥩': `<path d="M23 21.5l3.5 3.5" stroke-width="5.5"/>
+    <path d="M23 21.5l3.5 3.5" stroke="#FFF7ED" stroke-width="2.4"/>
+    <circle cx="27.3" cy="26.2" r="2.3" fill="#FFF7ED"/>
+    <path d="M4.5 13.5c0-5.5 7-8.5 13-7 7 1.8 8.5 9.5 4.8 14.2-4 5-11.5 5-15 .8C5.5 19.5 4.5 16.5 4.5 13.5z" fill="#FDA4AF"/>
+    <path d="M8 14c0-3.6 4.8-5.6 9.2-4.4 4.6 1.3 5.4 6.6 2.8 9.6-2.8 3.1-8.6 2.8-10.6-.3C8.6 17.5 8 15.8 8 14z" fill="#E11D48"/>
+    <path d="M11.5 13.5c1.8-1.6 4.8-1.4 6.5.6" stroke="#FDA4AF" stroke-width="1.8"/>`,
+  '☕': `<path d="M11 3.5c-1.6 2 1.6 3 0 5M15 3.5c-1.6 2 1.6 3 0 5M19 3.5c-1.6 2 1.6 3 0 5"/>
+    <ellipse cx="15" cy="26.5" rx="11.5" ry="2.5" fill="#86EFAC"/>
+    <path d="M22 14.5h2a3.2 3.2 0 0 1 0 6.4h-2.6"/>
+    <path d="M6.5 11.5h16v8c0 3.6-3 5.8-8 5.8s-8-2.2-8-5.8z" fill="#FB923C"/>
+    <path d="M7 15.5h15" stroke="#FFFFFF" stroke-width="2"/>`,
+  '📷': `<rect x="7" y="4" width="18" height="24" rx="3" fill="#A1A1AA"/>
+    <path d="M7 10h18" />
+    <circle cx="16" cy="14.5" r="3.4" fill="#3F3F46"/>
+    <circle cx="16" cy="22.2" r="4" fill="#3F3F46"/>
+    <circle cx="15" cy="21.2" r="1.2" fill="#BAE6FD" stroke="none"/>
+    <circle cx="15.2" cy="13.8" r="1" fill="#BAE6FD" stroke="none"/>
+    <rect x="9.5" y="6" width="3" height="2" rx=".5" fill="#FDE047" stroke-width="1.4"/>`,
+  '🏞️': `<rect x="3.5" y="5.5" width="25" height="21" rx="2" fill="#BAE6FD"/>
+    <circle cx="22.5" cy="11" r="3" fill="#FDE047"/>
+    <path d="M3.5 21.5 11 11.5l5.5 7 3.5-4 8.5 8.5v3.5h-25z" fill="#86EFAC"/>
+    <path d="M12.5 26.5c1.5-2.5 5-2 4.5-5" stroke="#3B82F6" stroke-width="2.6"/>
+    <rect x="3.5" y="5.5" width="25" height="21" rx="2"/>`,
+  '🛍️': `<path d="M17 10.5V8.5a3.5 3.5 0 0 1 7 0v2"/>
+    <path d="M14 10.5h13l-1.2 16.5H14.8z" fill="#86EFAC"/>
+    <path d="M7.5 14v-2.5a3.5 3.5 0 0 1 7 0V14"/>
+    <path d="M4.5 14h13l-1 14h-11z" fill="#FDA4AF"/>`
+};
+
+// 景點圖示：有自訂類別時畫 SVG 貼紙，否則顯示 fallback（通常是順序編號）
+function renderSpotIcon(value, fallback) {
+  const art = SPOT_ICON_ART[value];
+  if (!art) return String(fallback);
+  return `<svg class="spot-icon-art" viewBox="0 0 32 32" aria-hidden="true">`
+    + `<g fill="none" stroke="#18181B" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">${art}</g></svg>`;
+}
 // 每天的代表色（分頁、圖釘、卡片標頭），文字一律用黑色，所以都選明亮的顏色
 const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78BFA', '#22D3EE', '#F9A8D4'];
 
@@ -1035,7 +1083,7 @@ function renderSpotCard(spot, index, total) {
       <div class="spot-main">
         <span class="drag-handle" title="拖曳調整順序">${ICONS.grip}</span>
         <button class="spot-index ${spot.icon ? 'has-icon' : ''}" data-action="toggle-icon-picker" aria-haspopup="menu"
-          aria-expanded="${ui.iconPickerSpotId === spot.id}" title="更換圖示" aria-label="第 ${index + 1} 站，更換圖示">${spot.icon || index + 1}</button>
+          aria-expanded="${ui.iconPickerSpotId === spot.id}" title="更換圖示" aria-label="第 ${index + 1} 站，更換圖示">${renderSpotIcon(spot.icon, index + 1)}</button>
         <button class="spot-info" data-action="focus-spot" title="在地圖上查看">
           <span class="spot-name">${escapeHtml(spot.name)}</span>
           ${subline}
@@ -1046,11 +1094,15 @@ function renderSpotCard(spot, index, total) {
       </div>
       </div>
         ${ui.iconPickerSpotId === spot.id ? `
-          <div class="menu icon-picker" role="menu" aria-label="選擇景點圖示">
-            ${SPOT_ICONS.map(i => `
-              <button role="menuitemradio" aria-checked="${spot.icon === i.value}" data-action="set-spot-icon" data-icon="${i.value}">
-                <span class="ip-emoji">${i.value || index + 1}</span><span class="ip-label">${i.label}</span>
-              </button>`).join('')}
+          <div class="menu icon-picker" role="menu" aria-labelledby="icon-picker-title-${spot.id}">
+            <p class="ip-title" id="icon-picker-title-${spot.id}">景點類別</p>
+            <div class="ip-grid">
+              ${SPOT_ICONS.map(i => `
+                <button class="ip-card ${i.value ? '' : 'ip-number'}" role="menuitemradio" aria-checked="${spot.icon === i.value}"
+                  data-action="set-spot-icon" data-icon="${i.value}">
+                  <span class="ip-art">${renderSpotIcon(i.value, index + 1)}</span><span class="ip-label">${i.label}</span>
+                </button>`).join('')}
+            </div>
           </div>` : ''}
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
@@ -2107,7 +2159,7 @@ function selectRecentPlace(place) {
 function createPinElement(dayIndex, spotIndex, dimmed, icon) {
   const wrap = document.createElement('div');
   wrap.className = `pin-wrap${dimmed ? ' dimmed' : ''}`;
-  wrap.innerHTML = `<div class="pin" style="--c:${getDayColor(dayIndex)}"><span class="${icon ? 'pin-emoji' : ''}">${icon || `${dayIndex + 1}-${spotIndex + 1}`}</span></div>`;
+  wrap.innerHTML = `<div class="pin ${icon && SPOT_ICON_ART[icon] ? 'has-art' : ''}" style="--c:${getDayColor(dayIndex)}"><span class="${icon ? 'pin-art' : ''}">${renderSpotIcon(icon, `${dayIndex + 1}-${spotIndex + 1}`)}</span></div>`;
   return wrap;
 }
 
@@ -2417,7 +2469,7 @@ function renderNextStop() {
   const travel = renderDayTravel(day);
   el.dataset.spotId = spot.id;
   el.innerHTML = `
-    <span class="spot-index ${spot.icon ? 'has-icon' : ''}">${spot.icon || 1}</span>
+    <span class="spot-index ${spot.icon ? 'has-icon' : ''}">${renderSpotIcon(spot.icon, 1)}</span>
     <span class="next-text">
       <span class="next-label">下一站・${getDayLabel(dayIndex)}${getDayDateText(dayIndex) ? ` ${getDayDateText(dayIndex)}` : ''}</span>
       <span class="next-name">${escapeHtml(spot.name)}</span>
@@ -3114,7 +3166,7 @@ function buildHandbook({ print = false } = {}) {
     const items = day.spots.map((spot, j) => {
       const next = day.spots[j + 1];
       const card = `<li class="hb-spot">
-          <span class="hb-icon" style="background:${getDayColor(i)}">${spot.icon || j + 1}</span>
+          <span class="hb-icon" style="background:${spot.icon ? '#FFFFFF' : getDayColor(i)}">${renderSpotIcon(spot.icon, j + 1)}</span>
           <div class="hb-spot-body">
             <h3>${escapeHtml(spot.name)}</h3>
             ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim()).replace(/\n/g, '<br>')}</p>` : ''}
@@ -3175,6 +3227,7 @@ const HANDBOOK_CSS = `
 .hb-day-sum { margin:2px 0 12px 22px; font-size:12px; color:var(--muted); font-weight:700; }
 .hb-timeline { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; }
 .hb-spot { display:flex; gap:12px; padding:10px 12px; border:1.5px solid var(--edge); border-radius:12px; break-inside:avoid; }
+.hb-icon svg { width:24px; height:24px; }
 .hb-icon { flex-shrink:0; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--ink); font-size:14px; font-weight:900; }
 .hb-spot-body { flex:1; min-width:0; }
 .hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; }
