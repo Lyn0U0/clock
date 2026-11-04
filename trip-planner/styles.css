@@ -892,6 +892,56 @@ button.spot-index:hover { transform: scale(1.12); }
 .ts-arrow { margin: 0 6px; color: var(--muted); }
 .ts-sub { font-size: 11px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* 交通的自訂資訊：手動時間醒目、Google 預估劃線；車次與票價標籤；編輯按鈕 */
+.leg-custom-time { padding: 0 6px; border: 1.5px solid var(--ink); border-radius: 6px; background: var(--primary); }
+.leg-api-time { color: var(--muted); font-size: 11px; font-weight: 500; }
+.leg-edit-btn { width: 26px; height: 26px; }
+.leg-edit-btn svg { width: 13px; height: 13px; }
+.leg-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 4px 34px; }
+.leg-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 100%;
+  padding: 1px 9px;
+  border: 1.5px solid var(--ink);
+  border-radius: 999px;
+  background: var(--paper);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.leg-tag span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.leg-tag.cost { background: var(--primary-soft); font-variant-numeric: tabular-nums; }
+.leg-tag:hover { background: var(--primary); }
+.leg-modes .seg-btn span { display: none; } /* 六種交通方式只顯示圖示，名稱在提示文字裡 */
+
+/* 交通編輯視窗（沿用備註視窗的外框） */
+.leg-modal-icon { display: grid; place-items: center; width: 40px; height: 40px; border: 2px solid var(--ink); border-radius: 50%; background: var(--primary); flex-shrink: 0; }
+.leg-modal-icon svg { width: 20px; height: 20px; }
+#leg-modal-route { white-space: normal; text-wrap: balance; }
+.leg-fieldset { margin: 0; padding: 0; border: none; min-width: 0; }
+.leg-fieldset legend { padding: 0; margin-bottom: 6px; }
+.leg-mode-options .pill span { display: inline-flex; align-items: center; gap: 4px; }
+.leg-mode-options .pill svg { width: 14px; height: 14px; }
+.leg-note { height: auto; min-height: 64px; padding: 8px 12px; resize: vertical; line-height: 1.6; }
+.leg-cost-row { display: flex; gap: 8px; }
+.leg-currency { width: 96px; height: 40px; }
+.leg-cost { flex: 1; min-width: 0; height: 40px; font-size: 15px; font-weight: 700; }
+.leg-settle-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 8px; }
+.leg-check, .leg-radio { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.leg-check input, .leg-radio input[type="radio"] { width: 18px; height: 18px; accent-color: var(--ink); }
+.leg-check:has(input:disabled) { color: var(--muted); cursor: default; }
+.leg-payer { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; }
+.leg-payer select { height: 36px; }
+.leg-payer:has(select:disabled) { opacity: .5; }
+.leg-radio { min-height: 40px; }
+.leg-radio small { font-weight: 500; color: var(--muted); }
+.leg-radio:has(input[type="radio"]:disabled) { color: var(--muted); cursor: default; }
+.leg-minutes { width: 90px; height: 36px; font-weight: 700; }
+.leg-minutes.invalid { border-color: var(--danger); background: var(--danger-soft); }
+.note-foot-gap { flex: 1; }
+
 /* 分段切換（交通方式） */
 .segmented {
   display: flex;
@@ -1692,6 +1742,15 @@ button.spot-index:hover { transform: scale(1.12); }
   .note-modal { top: auto; bottom: 0; left: 0; width: 100%; max-height: 92%; border-width: 2px 0 0; border-radius: 20px 20px 0 0; transform: none;
     padding-bottom: calc(16px + var(--safe-bottom)); }
   .note-shortcut { display: none; }
+  .leg-edit-btn { width: 44px; height: 44px; }
+  .leg-mobile .leg-edit-btn { margin-left: auto; }
+  .leg-tags { margin-left: 0; }
+  .leg-tag { min-height: 30px; }
+  .leg-foot-wrap .btn-text { flex-basis: 100%; }
+  .leg-modal .note-foot { flex-wrap: wrap; }
+  .leg-modal .note-foot [data-action="reset-leg"] { flex-basis: 100%; height: 40px; }
+  .note-foot-gap { display: none; }
+  .leg-cost, .leg-currency, .leg-minutes { height: 46px; font-size: 16px; }
   #note-short { height: 48px; font-size: 16px; }
   .note-detail { font-size: 16px; }
   .note-foot .btn-text, .note-foot .btn-primary { height: 48px; flex: 1; }
@@ -1777,3 +1836,14 @@ button.spot-index:hover { transform: scale(1.12); }
 
 /* 手機待辦清單的背景要在導覽列（z 700，面板在其中）之下、行程抽屜之上 */
 #todo-backdrop { z-index: 695; }
+
+/* 交通編輯視窗：費用列與時間列的欄位不要撐滿整行 */
+.leg-cost-row .leg-currency { flex: none; width: 96px; }
+.leg-cost-row .leg-cost { flex: 1; width: auto; }
+.leg-radio .leg-minutes { flex: none; width: 96px; }
+.leg-payer, .leg-radio > span, .leg-check span { white-space: nowrap; }
+.leg-payer select { width: auto; min-width: 96px; }
+.leg-custom-time + .leg-api-time { flex-shrink: 0; }
+.leg-tags { align-items: center; }
+.leg-tags-badge { display: contents; }
+@media (max-width: 760px) { .leg-tags-badge { display: none; } } /* 手機的記帳標籤在交通標籤列 */

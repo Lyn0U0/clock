@@ -44,8 +44,12 @@ const TRAVEL_MODES = [
   { value: 'DRIVE', label: '開車', gmaps: 'driving' },
   { value: 'TWO_WHEELER', label: '機車', gmaps: 'two-wheeler' },
   { value: 'TRANSIT', label: '大眾運輸', gmaps: 'transit' },
-  { value: 'WALK', label: '步行', gmaps: 'walking' }
+  { value: 'WALK', label: '步行', gmaps: 'walking' },
+  { value: 'BICYCLE', label: '自行車', gmaps: 'bicycling' },
+  { value: 'CUSTOM', label: '自訂', gmaps: 'transit' } // 渡輪、包車、飛機等：不呼叫 Routes API，時間手動填
 ];
+const CURRENCIES = ['TWD', 'JPY', 'USD', 'KRW', 'EUR', 'HKD', 'CNY', 'THB'];
+const CURRENCY_SYMBOLS = { TWD: 'NT$', JPY: '¥', USD: 'US$', KRW: '₩', EUR: '€', HKD: 'HK$', CNY: '¥', THB: '฿' };
 const DEFAULT_MEMBERS = [{ id: 'member-me', name: '我' }];
 const MIN_MEMBERS = 1;
 const CLOUD_RETENTION_DAYS = 30; // 共享行程在雲端保留的天數（Firestore TTL 依 expireAt 刪除）
@@ -130,7 +134,8 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     startDate: 'YYYY-MM-DD' | '',       // 出發日期；設定後每天會標上日期
  *     activeDayId: dayId | OVERVIEW,
  *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 路段沒有個別設定時的交通方式
- *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
+ *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式（即 transportMode）
+ *     legDetails: { 'fromSpotId->toSpotId': LegDetail },      // 路段的自訂資訊
  *     members: [{ id, name }],                                // 旅伴，預設只有「我」
  *     expenses: [Expense],                                    // 記帳
  *     todos: [{ id, text, done }]                             // 整趟旅程的待辦清單（筆記本）
@@ -138,6 +143,14 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *   Spot = { id, name, lat, lng, placeId, icon, note, detailedNotes }
  *     spots 陣列順序就是當天的參觀順序；icon 為類別代號，空字串顯示編號
  *     note：簡短備註（單行，顯示在卡片上）；detailedNotes：詳細紀錄（多行，在備註視窗編輯）
+ *   LegDetail = {
+ *     transitNote,        // 車次、月台、轉乘指引、預約代碼
+ *     customDuration,     // 手動覆寫的交通時間（分鐘）；null 表示用 Google Maps 預估
+ *     cost, currency,     // 交通花費與幣別（預設 TWD）
+ *     paidBy,             // 付款人（memberId）
+ *     addToSettlement,    // 是否列入旅費結算（只有 TWD 可以）
+ *     expenseId           // 加入結算時對應的 Expense id（掛在 'leg:<pair>' 上）
+ *   }
  *   Expense = {
  *     id, title, amount, paidBy: memberId,
  *     ref: 'spot:<spotId>' | 'leg:<fromSpotId>-><toSpotId>',  // 掛在哪張卡片上
@@ -227,6 +240,7 @@ function normalizeState(s) {
   if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
   if (!Array.isArray(s.expenses)) s.expenses = [];
   if (!Array.isArray(s.todos)) s.todos = [];
+  if (!s.legDetails || typeof s.legDetails !== 'object') s.legDetails = {};
   s.todos = s.todos.filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || createId('todo'), text: t.text, done: Boolean(t.done) }));
   if (typeof s.tripName !== 'string') s.tripName = '';
   s.days.forEach(day => day.spots.forEach(spot => {
@@ -461,11 +475,80 @@ function setLegMode(fromId, toId, mode) {
 
 // 景點刪除或換順序後，不再相鄰的路段設定就沒有用了
 function pruneLegModes() {
-  if (!state.legModes) return;
   const live = new Set(state.days.flatMap(day => getDayLegs(day).map(({ from, to }) => getPairKey(from, to))));
-  Object.keys(state.legModes).forEach(key => {
-    if (!live.has(key)) delete state.legModes[key];
+  [state.legModes, state.legDetails].forEach(map => {
+    if (!map) return;
+    Object.keys(map).forEach(key => {
+      if (!live.has(key)) delete map[key];
+    });
   });
+}
+
+function getLegDetail(fromSpot, toSpot) {
+  return state.legDetails?.[getPairKey(fromSpot, toSpot)] || null;
+}
+
+// 路段實際採用的秒數：手動覆寫優先，否則用 Routes API 的預估；都沒有時為 null
+function getLegDurationSec(fromSpot, toSpot) {
+  const detail = getLegDetail(fromSpot, toSpot);
+  if (detail?.customDuration > 0) return detail.customDuration * 60;
+  const leg = legCache.get(getLegKey(fromSpot, toSpot, getLegMode(fromSpot, toSpot).value));
+  return leg?.status === 'ok' ? leg.durationSec : null;
+}
+
+// 路段的費用：加入結算時以記帳那筆為準（在記帳面板改了金額也會同步顯示）
+function getLegCost(detail) {
+  if (!detail) return null;
+  const linked = detail.expenseId && state.expenses.find(x => x.id === detail.expenseId);
+  if (linked) return { amount: linked.amount, currency: 'TWD', inSettlement: true };
+  return detail.cost > 0 ? { amount: detail.cost, currency: detail.currency || 'TWD', inSettlement: false } : null;
+}
+
+function formatCurrency(amount, currency) {
+  return `${CURRENCY_SYMBOLS[currency] || currency + ' '}${Math.round(amount).toLocaleString('en-US')}`;
+}
+
+// 交通編輯視窗按「儲存」：寫入路段資訊、交通方式，並與記帳同步
+function saveLegDetail(fromId, toId, input) {
+  const from = findSpot(fromId)?.spot;
+  const to = findSpot(toId)?.spot;
+  if (!from || !to) return;
+  const key = getPairKey(from, to);
+  const ref = getLegRef(from, to);
+  const prev = state.legDetails[key] || {};
+  const detail = {
+    transitNote: input.transitNote.trim(),
+    customDuration: input.customDuration > 0 ? Math.round(input.customDuration) : null,
+    cost: input.cost > 0 ? input.cost : null,
+    currency: input.currency || 'TWD',
+    paidBy: getMember(input.paidBy) ? input.paidBy : state.members[0].id,
+    addToSettlement: Boolean(input.addToSettlement && input.cost > 0 && input.currency === 'TWD'),
+    expenseId: prev.expenseId || null
+  };
+  // 加入結算：建立或更新掛在這段路上的那筆花費；取消勾選或清掉金額就移除
+  const linked = detail.expenseId && state.expenses.find(x => x.id === detail.expenseId);
+  if (detail.addToSettlement) {
+    const title = detail.transitNote.split('\n')[0].slice(0, 40) || `${from.name} → ${to.name}`;
+    if (linked) Object.assign(linked, { amount: detail.cost, paidBy: detail.paidBy, title: linked.title || title });
+    else {
+      const expense = { id: createId('expense'), ref, title, amount: detail.cost, paidBy: detail.paidBy, split: 'shared' };
+      state.expenses.push(expense);
+      detail.expenseId = expense.id;
+    }
+  } else if (linked) {
+    state.expenses = state.expenses.filter(x => x.id !== linked.id);
+    detail.expenseId = null;
+  } else {
+    detail.expenseId = null;
+  }
+  const empty = !detail.transitNote && !detail.customDuration && !detail.cost && !detail.expenseId;
+  if (empty) delete state.legDetails[key];
+  else state.legDetails[key] = detail;
+  if (TRAVEL_MODES.some(m => m.value === input.mode)) {
+    if (input.mode === getTravelMode().value) delete state.legModes[key];
+    else state.legModes[key] = input.mode;
+  }
+  commit();
 }
 
 // 景點或路段卡片消失後，掛在上面的花費一併移除
@@ -722,6 +805,8 @@ async function fetchLegRoute(fromSpot, toSpot, mode) {
   };
 }
 
+const MODE_TAG_EMOJI = { DRIVE: '🚗', TWO_WHEELER: '🛵', TRANSIT: '🚄', WALK: '🚶', BICYCLE: '🚲', CUSTOM: '🎫' };
+
 const VEHICLE_LABELS = {
   BUS: '公車', INTERCITY_BUS: '客運', TROLLEYBUS: '公車', SHARE_TAXI: '共乘',
   SUBWAY: '捷運', METRO_RAIL: '捷運', MONORAIL: '單軌', TRAM: '輕軌',
@@ -799,6 +884,11 @@ function requestLeg(from, to) {
   const key = getLegKey(from, to, mode);
   const cached = legCache.get(key);
   if (cached) return cached.promise || Promise.resolve(cached);
+  if (mode === 'CUSTOM') { // 自訂交通不查 Routes API
+    const result = { status: 'custom' };
+    legCache.set(key, result);
+    return Promise.resolve(result);
+  }
   const promise = fetchLegRoute(from, to, mode).then(result => {
     legCache.set(key, result);
     updateLegViews();
@@ -828,9 +918,12 @@ function retryLeg(fromId, toId) {
 function getDayTravelSec(day) {
   let total = 0;
   for (const { from, to } of getDayLegs(day)) {
-    const leg = legCache.get(getLegKey(from, to, getLegMode(from, to).value));
-    if (leg?.status !== 'ok') return null;
-    total += leg.durationSec;
+    const sec = getLegDurationSec(from, to);
+    if (sec === null) {
+      if (getLegMode(from, to).value === 'CUSTOM') continue; // 自訂交通沒填時間就不計入
+      return null;
+    }
+    total += sec;
   }
   return total;
 }
@@ -934,6 +1027,9 @@ const ICONS = {
   TWO_WHEELER: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3"/><circle cx="18.5" cy="16.5" r="3"/><path d="M8.5 16.5h5l3-7h-4M15 6h2.5l1 3.5M5.5 16.5 9 10h4"/></svg>',
   TRANSIT: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 14h.01M15 14h.01M8 21l2-4M16 21l-2-4"/></svg>',
   WALK: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="13" cy="4" r="1.5"/><path d="M10 21l2-6 3 3v3M9 12l2-5 4 3 3 1M11 7l-3 2-1 3"/></svg>',
+  BICYCLE: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5.5" cy="16.5" r="3.5"/><circle cx="18.5" cy="16.5" r="3.5"/><path d="M5.5 16.5 9 9h6l3.5 7.5M9 9l3.5 7.5L15 9M8 6h3"/></svg>',
+  CUSTOM: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 16h18l-2.5 4h-13zM6 16V9h9l3 7M9 9V5h4"/></svg>',
+  edit: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
   wallet: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7a2 2 0 0 1 2-2h11v4M4 7v10a2 2 0 0 0 2 2h13V9H6a2 2 0 0 1-2-2zM16 14h.01"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   external: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>'
@@ -1158,37 +1254,59 @@ function renderLegContent(fromSpot, toSpot) {
   const mode = getLegMode(fromSpot, toSpot);
   const key = getPairKey(fromSpot, toSpot);
   const modesOpen = ui.legModesKey === key;
-  const leg = apiKey ? legCache.get(getLegKey(fromSpot, toSpot, mode.value)) : null;
+  const detail = getLegDetail(fromSpot, toSpot);
+  const custom = detail?.customDuration > 0 ? detail.customDuration * 60 : null;
+  const isCustomMode = mode.value === 'CUSTOM';
+  const leg = apiKey && !isCustomMode ? legCache.get(getLegKey(fromSpot, toSpot, mode.value)) : null;
   const hasDetails = mode.value === 'TRANSIT' && leg?.status === 'ok' && leg.transitSteps?.length > 0;
   const detailsOpen = hasDetails && ui.legDetailsKey === key;
   const detailsBtn = hasDetails
     ? `<button class="icon-btn leg-details-btn ${detailsOpen ? 'on' : ''}" data-action="toggle-leg-details" aria-expanded="${detailsOpen}"
         title="${detailsOpen ? '收合' : '展開'}轉乘細節" aria-label="${detailsOpen ? '收合' : '展開'}轉乘細節">${detailsOpen ? '▲' : '▼'}</button>`
     : '';
+  // 時間：手動覆寫優先且醒目，Google 預估改成劃線灰字
+  const apiText = leg?.status === 'ok' ? formatDuration(leg.durationSec) : '';
+  const distText = leg?.status === 'ok' ? `<span class="leg-dist">${formatDistance(leg.distanceMeters)}</span>` : '';
+  let timeHtml;
+  if (custom) {
+    // 手動時間時省略距離，讓劃線的 Google 預估放得下
+    timeHtml = `<strong class="leg-custom-time" title="手動設定的時間">${formatDuration(custom)}</strong>${apiText ? `<s class="leg-api-time" title="Google Maps 預估">${apiText}</s>` : ''}`;
+  } else if (leg?.status === 'ok') {
+    timeHtml = `<strong>${apiText}</strong>${distText}`;
+  }
   let info;
-  if (!apiKey) {
+  if (timeHtml) {
+    const title = escapeHtml(`${mode.label}${custom ? `，手動設定 ${formatDuration(custom)}` : ''}${apiText ? `，Google 預估 ${apiText}` : ''}${leg?.description ? `，經 ${leg.description}` : ''}`);
+    info = hasDetails
+      ? `<button class="leg-info as-btn" data-action="toggle-leg-details" aria-expanded="${detailsOpen}" title="${title}">${timeHtml}</button>`
+      : `<span class="leg-info" title="${title}">${timeHtml}</span>`;
+  } else if (isCustomMode) {
+    info = `<button class="leg-info as-btn muted" data-action="edit-leg">自訂交通・設定時間</button>`;
+  } else if (!apiKey) {
     info = `<span class="leg-info muted">設定地圖金鑰後顯示交通時間</span>`;
   } else if (!leg || leg.status === 'loading') {
     info = `<span class="leg-info muted">計算中…</span>`;
-  } else if (leg.status === 'error') {
+  } else {
     info = `<span class="leg-info error" title="${escapeHtml(leg.detail || leg.message)}">${escapeHtml(leg.message)}</span>
       <button class="link-btn" data-action="retry-leg">重試</button>`;
-  } else {
-    const via = leg.description ? `，經 ${leg.description}` : '';
-    const title = escapeHtml(`${mode.label} ${formatDuration(leg.durationSec)}，${formatDistance(leg.distanceMeters)}${via}`);
-    const text = `<strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span>`;
-    // 有轉乘細節時，點時間文字也能展開
-    info = hasDetails
-      ? `<button class="leg-info as-btn" data-action="toggle-leg-details" aria-expanded="${detailsOpen}" title="${title}">${text}</button>`
-      : `<span class="leg-info" title="${title}">${text}</span>`;
   }
   const modeButtons = TRAVEL_MODES.map(m => `
       <button class="seg-btn ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
-        aria-pressed="${m.value === mode.value}" title="${m.label}">${ICONS[m.value]}<span>${m.label}</span></button>`).join('');
+        aria-pressed="${m.value === mode.value}" title="${m.label}" aria-label="${m.label}">${ICONS[m.value]}<span>${m.label}</span></button>`).join('');
   const dirUrl = escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode));
-  const pillText = leg?.status === 'ok'
-    ? `<strong>${formatDuration(leg.durationSec)}</strong><span class="leg-dist">${formatDistance(leg.distanceMeters)}</span>`
-    : `<span class="leg-dist">${!apiKey ? '路線' : leg?.status === 'error' ? '查看路線' : '計算中…'}</span>`;
+  const pillText = timeHtml || `<span class="leg-dist">${isCustomMode ? '自訂交通' : !apiKey ? '路線' : leg?.status === 'error' ? '查看路線' : '計算中…'}</span>`;
+  const editBtn = `<button class="icon-btn leg-edit-btn" data-action="edit-leg" title="編輯交通（車次、票價、時間）"
+      aria-label="編輯 ${escapeHtml(fromSpot.name)} 到 ${escapeHtml(toSpot.name)} 的交通">${ICONS.edit}</button>`;
+  // 自訂資訊標籤：車次／備註、票價（已加入結算的票價由記帳標籤顯示，不重複）
+  const cost = getLegCost(detail);
+  const notePill = detail?.transitNote
+    ? `<button class="leg-tag" data-action="edit-leg" title="${escapeHtml(detail.transitNote)}">${MODE_TAG_EMOJI[mode.value] || '🎫'} <span>${escapeHtml(detail.transitNote.split('\n')[0])}</span></button>` : '';
+  const costPill = cost && !cost.inSettlement
+    ? `<button class="leg-tag cost" data-action="edit-leg" title="票價（未列入結算）">${formatCurrency(cost.amount, cost.currency)}</button>` : '';
+  // 有自訂資訊時記帳標籤移到第二行，第一行才放得下手動時間與劃線的 Google 預估
+  const badge = renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`);
+  const tagsRow = Boolean(notePill || costPill || custom);
+  const tags = tagsRow ? `<div class="leg-tags">${notePill}${costPill}<span class="leg-tags-badge">${badge}</span></div>` : '';
   return `
     <div class="leg-mobile">
       <a class="leg-pill" href="${dirUrl}" target="_blank" rel="noopener" aria-label="用 Google 地圖導航：${mode.label}">
@@ -1196,16 +1314,19 @@ function renderLegContent(fromSpot, toSpot) {
       </a>
       ${detailsBtn}
       ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
+      ${editBtn}
     </div>
     <div class="leg-row">
       <button class="leg-mode-btn ${modesOpen ? 'on' : ''}" data-action="toggle-leg-modes" aria-expanded="${modesOpen}"
         title="交通方式：${mode.label}（點一下切換）" aria-label="交通方式：${mode.label}，點一下切換">${ICONS[mode.value]}</button>
       ${info}
       ${detailsBtn}
-      ${renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`)}
-      <a class="icon-btn leg-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener"
+      ${tagsRow ? '' : badge}
+      ${editBtn}
+      <a class="icon-btn leg-link" href="${dirUrl}" target="_blank" rel="noopener"
         title="在 Google 地圖查看路線" aria-label="在 Google 地圖查看路線">${ICONS.external}</a>
     </div>
+    ${tags}
     ${modesOpen ? `<div class="segmented leg-modes" role="group" aria-label="這段的交通方式">${modeButtons}</div>` : ''}
     ${detailsOpen ? renderTransitSteps(leg.transitSteps) : ''}`;
 }
@@ -1423,7 +1544,7 @@ function onActionClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
   // 備註標籤在卡片裡：只開備註視窗，不要再觸發卡片或文件層級的其他點擊處理（地圖聚焦、收合選單等）
-  if (btn.dataset.action === 'open-note') e.stopPropagation();
+  if (btn.dataset.action === 'open-note' || btn.dataset.action === 'edit-leg') e.stopPropagation();
   const spotId = btn.closest('.spot')?.dataset.spotId;
   const fromSpotMenu = Boolean(btn.closest('.spot-menu'));
   if (fromSpotMenu) ui.spotMenuId = null; // 選了選單項目就收起選單
@@ -1467,6 +1588,11 @@ function handleAction(btn, spotId) {
     case 'move-up': moveSpotBy(spotId, -1); break;
     case 'move-down': moveSpotBy(spotId, 1); break;
     case 'open-note': openNoteModal(spotId); break;
+    case 'edit-leg': {
+      const leg = btn.closest('.leg');
+      openLegModal(leg.dataset.from, leg.dataset.to);
+      break;
+    }
     case 'remove-spot': removeSpot(spotId); break;
     case 'focus-spot':
       focusSpotOnMap(spotId);
@@ -2478,6 +2604,132 @@ noteModal.el.addEventListener('keydown', e => {
 
 
 /* ==========================================================================
+ * 8f. 交通詳情與備註視窗
+ *
+ * 交通連接列的鉛筆（或車次／票價標籤）打開這個視窗，編輯：交通方式、車次備註、費用（可加入結算）、
+ * 時間模式（Google 預估或手動分鐘）。「重設回 API 預設值」把交通方式與時間恢復預設，車次與費用保留。
+ * ========================================================================== */
+
+const legModal = { el: document.getElementById('leg-modal'), from: null, to: null, returnFocus: null };
+
+function openLegModal(fromId, toId) {
+  const from = findSpot(fromId)?.spot;
+  const found = findSpot(toId);
+  if (!from || !found) return;
+  const to = found.spot;
+  legModal.from = fromId;
+  legModal.to = toId;
+  legModal.returnFocus = document.activeElement;
+  const detail = getLegDetail(from, to) || {};
+  const form = legModal.el;
+  document.getElementById('leg-modal-route').innerHTML = `${escapeHtml(from.name)}<span aria-label="到"> ➔ </span>${escapeHtml(to.name)}`;
+  document.getElementById('leg-modal-day').textContent = `${getDayLabel(found.dayIndex)}${getDayDateText(found.dayIndex) ? `・${getDayDateText(found.dayIndex)}` : ''}`;
+  form.querySelector('.leg-mode-options').innerHTML = TRAVEL_MODES.map(m => `
+      <label class="pill"><input type="radio" name="mode" value="${m.value}" ${getLegMode(from, to).value === m.value ? 'checked' : ''}>
+        <span>${ICONS[m.value]}${m.label}</span></label>`).join('');
+  form.elements.transitNote.value = detail.transitNote || '';
+  const cost = getLegCost(detail);
+  form.elements.cost.value = cost ? cost.amount : '';
+  form.elements.currency.value = cost?.currency || detail.currency || 'TWD';
+  form.elements.paidBy.innerHTML = state.members.map(m => `<option value="${m.id}">${escapeHtml(getMemberName(m))}</option>`).join('');
+  form.elements.paidBy.value = getMember(detail.paidBy) ? detail.paidBy : state.members[0].id;
+  form.elements.addToSettlement.checked = Boolean(cost?.inSettlement || detail.addToSettlement);
+  form.elements.timeMode.value = detail.customDuration > 0 ? 'manual' : 'api';
+  form.elements.customDuration.value = detail.customDuration || '';
+  updateLegModalState();
+  form.hidden = false;
+  document.getElementById('leg-backdrop').hidden = false;
+  form.elements.transitNote.focus();
+}
+
+// 依目前選擇更新：Google 預估文字、自訂交通必須手動時間、非台幣不能加入結算
+function updateLegModalState() {
+  const form = legModal.el;
+  const from = findSpot(legModal.from)?.spot;
+  const to = findSpot(legModal.to)?.spot;
+  if (!from || !to) return;
+  const mode = form.elements.mode.value;
+  const leg = mode === 'CUSTOM' ? null : legCache.get(getLegKey(from, to, mode));
+  const apiRadio = form.querySelector('input[name="timeMode"][value="api"]');
+  apiRadio.disabled = mode === 'CUSTOM';
+  if (apiRadio.disabled) form.elements.timeMode.value = 'manual';
+  document.getElementById('leg-api-estimate').textContent = mode === 'CUSTOM'
+    ? '自訂交通沒有預估時間'
+    : leg?.status === 'ok' ? `（${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}）`
+      : mode !== getLegMode(from, to).value ? '（儲存後計算）' : '（尚未取得）';
+  form.elements.customDuration.disabled = form.elements.timeMode.value !== 'manual';
+  const twd = form.elements.currency.value === 'TWD';
+  const hasCost = Number(form.elements.cost.value) > 0;
+  form.elements.addToSettlement.disabled = !twd || !hasCost;
+  if (!twd) form.elements.addToSettlement.checked = false;
+  form.elements.paidBy.disabled = !form.elements.addToSettlement.checked;
+  document.getElementById('leg-settle-hint').textContent = !twd
+    ? '旅費結算以新台幣計算，其他幣別只會記錄在這段交通上'
+    : !hasCost ? '填寫金額後可以加入旅費結算' : form.elements.addToSettlement.checked ? `會以「${getSharedLabel()}」列入旅費結算，之後可在記帳標籤調整` : '';
+}
+
+function closeLegModal() {
+  if (legModal.el.hidden) return;
+  legModal.el.hidden = true;
+  document.getElementById('leg-backdrop').hidden = true;
+  if (legModal.returnFocus?.isConnected) legModal.returnFocus.focus();
+}
+
+function submitLegModal() {
+  const form = legModal.el;
+  const manual = form.elements.timeMode.value === 'manual';
+  saveLegDetail(legModal.from, legModal.to, {
+    mode: form.elements.mode.value,
+    transitNote: form.elements.transitNote.value,
+    customDuration: manual ? Number(form.elements.customDuration.value) : null,
+    cost: Number(form.elements.cost.value) || 0,
+    currency: form.elements.currency.value,
+    paidBy: form.elements.paidBy.value,
+    addToSettlement: form.elements.addToSettlement.checked
+  });
+  legModal.returnFocus = null;
+  closeLegModal();
+}
+
+// 重設：交通方式回到預設、時間改回 Google 預估；車次備註與費用保留
+function resetLegModal() {
+  const form = legModal.el;
+  form.elements.mode.value = getTravelMode().value;
+  form.elements.timeMode.value = 'api';
+  form.elements.customDuration.value = '';
+  updateLegModalState();
+}
+
+legModal.el.addEventListener('submit', e => {
+  e.preventDefault();
+  if (legModal.el.elements.timeMode.value === 'manual' && !(Number(legModal.el.elements.customDuration.value) > 0)) {
+    legModal.el.elements.customDuration.focus();
+    legModal.el.elements.customDuration.classList.add('invalid');
+    return;
+  }
+  submitLegModal();
+});
+legModal.el.addEventListener('input', e => {
+  if (e.target.name === 'customDuration') e.target.classList.remove('invalid');
+  updateLegModalState();
+});
+legModal.el.addEventListener('click', e => {
+  if (e.target.closest('[data-action="close-leg"]')) closeLegModal();
+  if (e.target.closest('[data-action="reset-leg"]')) resetLegModal();
+});
+document.getElementById('leg-backdrop').addEventListener('click', closeLegModal);
+legModal.el.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeLegModal();
+  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    legModal.el.requestSubmit();
+  }
+});
+
+
+/* ==========================================================================
  * 8e. 待辦清單（導覽列的筆記本）
  *
  * 整趟旅程共用一份待辦：出發前要訂的票、要帶的東西等。存在 state.todos，
@@ -2896,6 +3148,7 @@ function pickTripData(source) {
     days: source.days,
     travelMode: source.travelMode || TRAVEL_MODES[0].value,
     legModes: source.legModes || {},
+    legDetails: source.legDetails || {},
     members: source.members,
     todos: source.todos || []
   };
@@ -3087,6 +3340,7 @@ function mergeTrip(base, local, remote) {
     days: days.length ? days : remote.days,
     travelMode: pick(base.travelMode, local.travelMode, remote.travelMode),
     legModes: mergeMap(base.legModes, local.legModes, remote.legModes),
+    legDetails: mergeMap(base.legDetails, local.legDetails, remote.legDetails),
     members: mergeIds(base.members.map(m => m.id), local.members.map(m => m.id), remote.members.map(m => m.id))
       .filter(id => members[id]).map(id => members[id]),
     // 待辦：每一項各自比較，兩人同時新增不同項目都會保留
@@ -3274,7 +3528,7 @@ function renderSyncBar() {
  *     三種格式都用 buildHandbook() 產生同一份內容：每日行程、圖示與備註、交通與轉乘、記帳與結算。
  * ========================================================================== */
 
-const MODE_EMOJI = { DRIVE: '🚗', TWO_WHEELER: '🛵', TRANSIT: '🚆', WALK: '🚶' };
+const MODE_EMOJI = { DRIVE: '🚗', TWO_WHEELER: '🛵', TRANSIT: '🚆', WALK: '🚶', BICYCLE: '🚲', CUSTOM: '🎫' };
 const ENDED_DISMISS_STORAGE = 'trip-planner-ended-dismissed';
 
 function renderCloudTtl() {
@@ -3348,7 +3602,14 @@ function getLegExport(from, to) {
     durationSec: ok ? leg.durationSec : null,
     distanceMeters: ok ? leg.distanceMeters : null,
     description: ok ? leg.description : '',
-    transitSteps: ok ? leg.transitSteps || [] : []
+    transitSteps: ok ? leg.transitSteps || [] : [],
+    // 自訂資訊（transportMode 即 mode）
+    customDuration: getLegDetail(from, to)?.customDuration || null,
+    transitNote: getLegDetail(from, to)?.transitNote || '',
+    cost: getLegCost(getLegDetail(from, to))?.amount ?? null,
+    currency: getLegCost(getLegDetail(from, to))?.currency || null,
+    paidBy: getLegDetail(from, to)?.paidBy || null,
+    inSettlement: Boolean(getLegCost(getLegDetail(from, to))?.inSettlement)
   };
 }
 
@@ -3370,6 +3631,7 @@ function buildExportData() {
       members: state.members,
       travelMode: state.travelMode,
       legModes: state.legModes || {},
+      legDetails: state.legDetails || {},
       expenses: state.expenses.filter(x => x.amount > 0),
       todos: state.todos
     },
@@ -3393,7 +3655,12 @@ function renderHandbookExpenses(ref) {
 
 function renderHandbookLeg(from, to, print) {
   const leg = getLegExport(from, to);
-  const time = leg.durationSec !== null ? `${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}` : '交通時間未計算';
+  const apiTime = leg.durationSec !== null ? `${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}` : '';
+  const time = leg.customDuration
+    ? `${formatDuration(leg.customDuration * 60)}（手動）${apiTime ? `<small class="hb-api">Google 預估 ${apiTime}</small>` : ''}`
+    : apiTime || '交通時間未計算';
+  const extra = [leg.transitNote && `<span class="hb-tag">${escapeHtml(leg.transitNote).replace(/\n/g, '<br>')}</span>`,
+    leg.cost && !leg.inSettlement && `<span class="hb-tag">票價 ${formatCurrency(leg.cost, leg.currency)}</span>`].filter(Boolean).join('');
   const steps = leg.transitSteps.length ? `
       <details class="hb-transit" ${print ? 'open' : ''}>
         <summary>轉乘細節</summary>
@@ -3403,7 +3670,7 @@ function renderHandbookLeg(from, to, print) {
               ${escapeHtml(step.from)} ➔ ${escapeHtml(step.to)}<small>${[step.departTime && `${escapeHtml(step.departTime)} 上車`, step.stops && `${step.stops} 站`, formatDuration(step.sec)].filter(Boolean).join('・')}</small></li>`).join('')}
         </ol>
       </details>` : '';
-  return `<li class="hb-leg"><span class="hb-leg-mode">${MODE_EMOJI[leg.mode] || '🚌'} ${leg.modeLabel}</span><span class="hb-leg-time">${time}</span>${steps}
+  return `<li class="hb-leg"><span class="hb-leg-mode">${MODE_EMOJI[leg.mode] || '🚌'} ${leg.modeLabel}</span><span class="hb-leg-time">${time}</span>${extra ? `<div class="hb-tags">${extra}</div>` : ''}${steps}
       ${renderHandbookExpenses(getLegRef(from, to))}</li>`;
 }
 
@@ -3494,6 +3761,9 @@ const HANDBOOK_CSS = `
 .hb-leg { margin-left:26px; padding:8px 0 8px 18px; border-left:2px dashed #A8A090; font-size:13px; break-inside:avoid; }
 .hb-leg-mode { font-weight:700; margin-right:8px; }
 .hb-leg-time { font-weight:900; }
+.hb-api { margin-left:6px; font-weight:500; color:var(--muted); text-decoration:line-through; }
+.hb-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+.hb-tag { padding:1px 8px; border:1.5px solid var(--ink); border-radius:999px; background:var(--yellow-soft); font-size:12px; font-weight:700; }
 .hb-transit { margin-top:6px; }
 .hb-transit summary { cursor:pointer; font-size:12px; font-weight:700; color:var(--muted); }
 .hb-transit ol { list-style:none; margin:6px 0 0; padding:8px 10px; border:1.5px solid var(--ink); border-radius:10px; background:var(--paper); display:flex; flex-direction:column; gap:6px; }
@@ -3668,6 +3938,7 @@ importInput.addEventListener('change', async () => {
     members: trip.members,
     travelMode: trip.travelMode,
     legModes: trip.legModes || {},
+    legDetails: trip.legDetails || {},
     expenses: Array.isArray(trip.expenses) ? trip.expenses : [],
     todos: Array.isArray(trip.todos) ? trip.todos : [],
     activeDayId: OVERVIEW

@@ -265,6 +265,62 @@
       <button type="submit" class="btn-primary">儲存</button>
     </footer>
   </form>
+  <div class="drawer-backdrop" id="leg-backdrop" hidden></div>
+  <form class="note-modal leg-modal" id="leg-modal" role="dialog" aria-modal="true" aria-labelledby="leg-modal-route" hidden>
+    <header class="note-head">
+      <span class="leg-modal-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="14" rx="3"/><path d="M5 11h14M9 14h.01M15 14h.01M8 21l2-4M16 21l-2-4"/></svg>
+      </span>
+      <div class="note-titles">
+        <h2 id="leg-modal-route"></h2>
+        <p id="leg-modal-day"></p>
+      </div>
+      <button type="button" class="icon-btn" data-action="close-leg" aria-label="關閉" title="關閉（Esc）">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <fieldset class="note-field leg-fieldset">
+      <legend class="note-label">交通方式</legend>
+      <div class="pills leg-mode-options"></div>
+    </fieldset>
+    <label class="note-field">
+      <span class="note-label">車次與行程備註 <small>班次、月台、轉乘指引、預約代碼</small></span>
+      <textarea class="field leg-note" name="transitNote" rows="2" maxlength="200"
+        placeholder="例如：自強號 218 次，10:15 發車，第 2 月台"></textarea>
+    </label>
+    <fieldset class="note-field leg-fieldset">
+      <legend class="note-label">費用</legend>
+      <div class="leg-cost-row">
+        <select class="field leg-currency" name="currency" aria-label="幣別">
+          <option value="TWD">TWD</option><option value="JPY">JPY</option><option value="USD">USD</option><option value="KRW">KRW</option>
+          <option value="EUR">EUR</option><option value="HKD">HKD</option><option value="CNY">CNY</option><option value="THB">THB</option>
+        </select>
+        <input class="field leg-cost" name="cost" type="number" min="0" step="1" inputmode="numeric" placeholder="金額，例如 520" aria-label="金額">
+      </div>
+      <div class="leg-settle-row">
+        <label class="leg-check"><input type="checkbox" name="addToSettlement"><span>加入旅費結算清單</span></label>
+        <label class="leg-payer">付款人
+          <select class="field" name="paidBy" aria-label="付款人"></select>
+        </label>
+      </div>
+      <p class="note-hint" id="leg-settle-hint"></p>
+    </fieldset>
+    <fieldset class="note-field leg-fieldset">
+      <legend class="note-label">時間</legend>
+      <label class="leg-radio"><input type="radio" name="timeMode" value="api" checked>
+        <span>使用 Google Maps 預估時間 <small id="leg-api-estimate"></small></span></label>
+      <label class="leg-radio"><input type="radio" name="timeMode" value="manual">
+        <span>手動設定時間</span>
+        <input class="field leg-minutes" name="customDuration" type="number" min="1" max="1440" step="1" inputmode="numeric" aria-label="分鐘">
+        <span>分鐘</span></label>
+    </fieldset>
+    <footer class="note-foot">
+      <button type="button" class="btn-text" data-action="reset-leg" title="交通方式與時間改回預設，車次與費用保留">重設回 API 預設值</button>
+      <span class="note-foot-gap"></span>
+      <button type="button" class="btn-text" data-action="close-leg">取消</button>
+      <button type="submit" class="btn-primary">儲存</button>
+    </footer>
+  </form>
   <input type="file" id="import-file" accept="application/json,.json" hidden>
   <div id="print-root"></div>
 
