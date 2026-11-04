@@ -896,8 +896,7 @@ function refreshVisibleLegs() {
 }
 
 // 取得一段路的交通資料；已算過或正在算就沿用，回傳 Promise 方便匯出時等全部算完
-function requestLeg(from, to) {
-  const mode = getLegMode(from, to).value;
+function requestLeg(from, to, mode = getLegMode(from, to).value) {
   const key = getLegKey(from, to, mode);
   const cached = legCache.get(key);
   if (cached) return cached.promise || Promise.resolve(cached);
@@ -2845,6 +2844,7 @@ function openLegModal(fromId, toId) {
   const to = found.spot;
   legModal.from = fromId;
   legModal.to = toId;
+  document.getElementById('leg-reset-status').hidden = true;
   legModal.returnFocus = document.activeElement;
   const detail = getLegDetail(from, to) || {};
   const form = legModal.el;
@@ -2877,14 +2877,22 @@ function updateLegModalState() {
   const to = findSpot(legModal.to)?.spot;
   if (!from || !to) return;
   const mode = form.elements.mode.value;
-  const leg = mode === 'CUSTOM' ? null : legCache.get(getLegKey(from, to, mode));
+  let leg = mode === 'CUSTOM' ? null : legCache.get(getLegKey(from, to, mode));
+  // 視窗裡換了交通方式（或按了重設）就先查這個方式的預估，不用等儲存
+  if (mode !== 'CUSTOM' && !leg && apiKey) {
+    requestLeg(from, to, mode).then(() => {
+      if (!form.hidden && legModal.from === from.id && legModal.to === to.id) updateLegModalState();
+    });
+    leg = legCache.get(getLegKey(from, to, mode));
+  }
   const apiRadio = form.querySelector('input[name="timeMode"][value="api"]');
   apiRadio.disabled = mode === 'CUSTOM';
   if (apiRadio.disabled && form.elements.timeMode.value === 'api') form.elements.timeMode.value = 'none';
   document.getElementById('leg-api-estimate').textContent = mode === 'CUSTOM'
     ? '自訂交通沒有預估時間'
     : leg?.status === 'ok' ? `（${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}）`
-      : mode !== getLegMode(from, to).value ? '（儲存後計算）' : '（尚未取得）';
+      : leg?.status === 'loading' ? '（計算中…）'
+      : leg?.status === 'error' ? `（${leg.message}）` : '（尚未取得）';
   form.elements.customDuration.disabled = form.elements.timeMode.value !== 'manual';
   const twd = form.elements.currency.value === 'TWD';
   const hasCost = Number(form.elements.cost.value) > 0;
@@ -2921,8 +2929,7 @@ function submitLegModal() {
   closeLegModal();
 }
 
-// 重設：交通方式回到預設、時間改回 Google 預估，並立刻儲存、關閉視窗
-// （之前只改表單、還要再按儲存，按取消或關閉就等於沒重設）；車次備註、費用、待確認保留
+// 重設：交通方式回到預設、時間改回 Google 預估（只改表單，按「儲存」才套用）；車次備註、費用、待確認保留
 function resetLegModal() {
   const form = legModal.el;
   form.elements.mode.value = getTravelMode().value;
@@ -2930,7 +2937,10 @@ function resetLegModal() {
   form.elements.customDuration.value = '';
   form.elements.customDuration.classList.remove('invalid');
   updateLegModalState();
-  submitLegModal();
+  const status = document.getElementById('leg-reset-status');
+  status.textContent = '已改回預設，按「儲存」套用';
+  status.hidden = false;
+  form.querySelector('button[type="submit"]').focus();
 }
 
 legModal.el.addEventListener('submit', e => {
@@ -2944,6 +2954,7 @@ legModal.el.addEventListener('submit', e => {
 });
 legModal.el.addEventListener('input', e => {
   if (e.target.name === 'customDuration') e.target.classList.remove('invalid');
+  document.getElementById('leg-reset-status').hidden = true;
   updateLegModalState();
 });
 legModal.el.addEventListener('click', e => {

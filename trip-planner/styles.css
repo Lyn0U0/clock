@@ -1924,3 +1924,4 @@ button.spot-index:hover { transform: scale(1.12); }
 .note-tentative { min-height: 42px; }
 .leg-unconfirmed-check { margin: 0 0 4px; }
 .leg-unconfirmed-check small { color: var(--muted); font-weight: 500; }
+.leg-reset-status { margin: 0; align-self: center; font-weight: 700; color: var(--ink); }
