@@ -124,7 +124,8 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     travelMode: 'DRIVE' | 'TWO_WHEELER' | 'TRANSIT' | 'WALK',  // 路段沒有個別設定時的交通方式
  *     legModes: { 'fromSpotId->toSpotId': travelMode },       // 個別路段改用的交通方式
  *     members: [{ id, name }],                                // 旅伴，預設只有「我」
- *     expenses: [Expense]                                     // 記帳
+ *     expenses: [Expense],                                    // 記帳
+ *     todos: [{ id, text, done }]                             // 整趟旅程的待辦清單（筆記本）
  *   }
  *   Spot = { id, name, lat, lng, placeId, icon, note, detailedNotes }
  *     spots 陣列順序就是當天的參觀順序；icon 為類別代號，空字串顯示編號
@@ -217,6 +218,8 @@ function normalizeSpotNotes(spot) {
 function normalizeState(s) {
   if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
   if (!Array.isArray(s.expenses)) s.expenses = [];
+  if (!Array.isArray(s.todos)) s.todos = [];
+  s.todos = s.todos.filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || createId('todo'), text: t.text, done: Boolean(t.done) }));
   if (typeof s.tripName !== 'string') s.tripName = '';
   s.days.forEach(day => day.spots.forEach(spot => {
     if (!SPOT_ICONS.some(i => i.value === spot.icon)) spot.icon = '';
@@ -944,6 +947,7 @@ function render() {
   renderDayList();
   renderSettleButton();
   renderSettlement();
+  renderTodos();
   renderNextStop();
   layoutSheet(false);
   if (map) {
@@ -1433,6 +1437,7 @@ function handleAction(btn, spotId) {
       render();
       break;
     case 'toggle-mobile-panel': toggleMobilePanel(); break;
+    case 'toggle-todos': setTodosOpen(document.getElementById('todo-panel').hidden); break;
     case 'open-export': closeNavMenu(); toggleMobilePanel(false); setExportOpen(true); break;
     case 'import-json': closeNavMenu(); importInput.click(); break;
     case 'toggle-icon-picker':
@@ -2465,6 +2470,108 @@ noteModal.el.addEventListener('keydown', e => {
 
 
 /* ==========================================================================
+ * 8e. 待辦清單（導覽列的筆記本）
+ *
+ * 整趟旅程共用一份待辦：出發前要訂的票、要帶的東西等。存在 state.todos，
+ * 跟著本機儲存、雲端同步、JSON 匯出匯入與旅行手帳。
+ * ========================================================================== */
+
+const NOTEBOOK_ART = `<rect x="7.5" y="3.5" width="18" height="25" rx="2" fill="#FDE047"/>
+    <path d="M11.5 3.5v25"/>
+    <path d="M14.5 10.5h7.5M14.5 15h7.5M14.5 19.5h5"/>
+    <path d="M4.5 8.5h4.5M4.5 13.5h4.5M4.5 18.5h4.5M4.5 23.5h4.5" stroke-width="2.4"/>
+    <path d="M19 23.5l1.8 1.8 3.4-3.6" stroke="#E11D48" stroke-width="2.2"/>`;
+
+function addTodo(text) {
+  const value = text.trim();
+  if (!value) return;
+  state.todos.push({ id: createId('todo'), text: value, done: false });
+  commit();
+}
+
+function toggleTodo(id) {
+  const todo = state.todos.find(t => t.id === id);
+  if (!todo) return;
+  todo.done = !todo.done;
+  commit();
+}
+
+function removeTodo(id) {
+  state.todos = state.todos.filter(t => t.id !== id);
+  commit();
+}
+
+function clearDoneTodos() {
+  state.todos = state.todos.filter(t => !t.done);
+  commit();
+}
+
+// 只重繪清單與數字，不動輸入框（避免打字中被打斷）
+function renderTodos() {
+  const left = state.todos.filter(t => !t.done).length;
+  const count = document.getElementById('todo-count');
+  count.hidden = left === 0;
+  count.textContent = left;
+  document.getElementById('todo-btn').setAttribute('aria-label', `待辦清單，還有 ${left} 項未完成`);
+  document.getElementById('todo-progress').textContent = state.todos.length ? `${state.todos.length - left}/${state.todos.length} 完成` : '';
+  document.getElementById('todo-clear').hidden = !state.todos.some(t => t.done);
+  document.getElementById('todo-list').innerHTML = state.todos.length
+    ? state.todos.map(t => `
+        <li class="todo-item ${t.done ? 'done' : ''}" data-todo-id="${t.id}">
+          <label class="todo-check">
+            <input type="checkbox" ${t.done ? 'checked' : ''} aria-label="${escapeHtml(t.text)}">
+            <span class="todo-box" aria-hidden="true"></span>
+            <span class="todo-text">${escapeHtml(t.text)}</span>
+          </label>
+          <button class="icon-btn todo-remove" data-todo-remove aria-label="刪除「${escapeHtml(t.text)}」" title="刪除">${ICONS.close}</button>
+        </li>`).join('')
+    : '<li class="todo-empty">還沒有待辦事項。訂票、換匯、要帶的東西，都可以記在這裡。</li>';
+}
+
+function setTodosOpen(open) {
+  const panel = document.getElementById('todo-panel');
+  panel.hidden = !open;
+  document.getElementById('todo-btn').setAttribute('aria-expanded', String(open));
+  document.getElementById('todo-backdrop').hidden = !(open && isMobile());
+  if (open) {
+    toggleMobilePanel(false);
+    document.getElementById('todo-input').focus();
+  }
+}
+
+document.getElementById('todo-btn').innerHTML = `<svg class="spot-icon-art" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="#18181B" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">${NOTEBOOK_ART}</g></svg>`
+  + '<span class="todo-count" id="todo-count" hidden></span>';
+document.getElementById('todo-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const input = document.getElementById('todo-input');
+  addTodo(input.value);
+  input.value = '';
+  input.focus();
+});
+document.getElementById('todo-list').addEventListener('change', e => {
+  const item = e.target.closest('[data-todo-id]');
+  if (item && e.target.matches('input[type="checkbox"]')) toggleTodo(item.dataset.todoId);
+});
+document.getElementById('todo-list').addEventListener('click', e => {
+  const btn = e.target.closest('[data-todo-remove]');
+  if (btn) removeTodo(btn.closest('[data-todo-id]').dataset.todoId);
+});
+document.getElementById('todo-clear').addEventListener('click', clearDoneTodos);
+document.getElementById('todo-close').addEventListener('click', () => setTodosOpen(false));
+document.getElementById('todo-backdrop').addEventListener('click', () => setTodosOpen(false));
+// 點面板以外或按 Esc 收起
+document.addEventListener('click', e => {
+  if (!document.getElementById('todo-panel').hidden && !e.target.closest('.todo-wrap')) setTodosOpen(false);
+});
+// Esc 收起（焦點不在面板裡時也有效，例如按了「清除已完成」之後）
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape' || document.getElementById('todo-panel').hidden) return;
+  setTodosOpen(false);
+  document.getElementById('todo-btn').focus();
+});
+
+
+/* ==========================================================================
  * 8c. 手機版（寬度 ≤ 760px）
  *
  *   - 地圖滿版，行程放在底部抽屜：peek（天數分頁＋下一站）、half（50%）、full（90%）三段停靠。
@@ -2781,7 +2888,8 @@ function pickTripData(source) {
     days: source.days,
     travelMode: source.travelMode || TRAVEL_MODES[0].value,
     legModes: source.legModes || {},
-    members: source.members
+    members: source.members,
+    todos: source.todos || []
   };
 }
 
@@ -2972,7 +3080,13 @@ function mergeTrip(base, local, remote) {
     travelMode: pick(base.travelMode, local.travelMode, remote.travelMode),
     legModes: mergeMap(base.legModes, local.legModes, remote.legModes),
     members: mergeIds(base.members.map(m => m.id), local.members.map(m => m.id), remote.members.map(m => m.id))
-      .filter(id => members[id]).map(id => members[id])
+      .filter(id => members[id]).map(id => members[id]),
+    // 待辦：每一項各自比較，兩人同時新增不同項目都會保留
+    todos: (() => {
+      const [b, l, r] = [base.todos || [], local.todos || [], remote.todos || []];
+      const items = mergeMap(byId(b), byId(l), byId(r));
+      return mergeIds(b.map(t => t.id), l.map(t => t.id), r.map(t => t.id)).filter(id => items[id]).map(id => items[id]);
+    })()
   };
 }
 
@@ -3248,7 +3362,8 @@ function buildExportData() {
       members: state.members,
       travelMode: state.travelMode,
       legModes: state.legModes || {},
-      expenses: state.expenses.filter(x => x.amount > 0)
+      expenses: state.expenses.filter(x => x.amount > 0),
+      todos: state.todos
     },
     legs,
     settlement: {
@@ -3329,6 +3444,10 @@ function buildHandbook({ print = false } = {}) {
       <nav class="hb-toc">${toc}<a href="#settle">旅費結算</a></nav>
     </header>
     ${days}
+    ${state.todos.length ? `<section class="hb-settle hb-todos" id="todos">
+      <h2>📒 待辦清單</h2>
+      <ul>${state.todos.map(t => `<li class="${t.done ? 'done' : ''}"><span aria-hidden="true">${t.done ? '☑' : '☐'}</span>${escapeHtml(t.text)}</li>`).join('')}</ul>
+    </section>` : ''}
     <section class="hb-settle" id="settle">
       <h2>💰 旅費結算</h2>
       <div class="hb-verdict"><p class="hb-eyebrow">結算建議</p>${verdict}</div>
@@ -3390,6 +3509,8 @@ const HANDBOOK_CSS = `
 .hb-table thead th { font-size:11px; color:var(--muted); }
 .hb-table .plus { color:#15803D; font-weight:900; }
 .hb-table .minus { color:#E11D48; font-weight:900; }
+.hb-todos ul { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:4px; font-size:14px; }
+.hb-todos li { display:flex; gap:8px; } .hb-todos li.done { color:var(--muted); text-decoration:line-through; }
 .hb-foot { text-align:center; font-size:11px; color:var(--muted); }
 @media (max-width:520px) { .hb-page { padding:16px 12px 40px; } .hb-cover, .hb-day, .hb-settle { padding:14px; } .hb-table { display:block; overflow-x:auto; } }
 @media print {
@@ -3540,6 +3661,7 @@ importInput.addEventListener('change', async () => {
     travelMode: trip.travelMode,
     legModes: trip.legModes || {},
     expenses: Array.isArray(trip.expenses) ? trip.expenses : [],
+    todos: Array.isArray(trip.todos) ? trip.todos : [],
     activeDayId: OVERVIEW
   });
   ui.lastLiveRefs = new Set(); // 不要把舊行程的卡片當成被刪除而清掉花費

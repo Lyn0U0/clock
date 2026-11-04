@@ -1320,6 +1320,83 @@ button.spot-index:hover { transform: scale(1.12); }
   #print-root { display: block !important; }
 }
 
+/* ==========================================================================
+ * 待辦清單：導覽列的筆記本按鈕 + 展開面板
+ * ========================================================================== */
+.todo-wrap { position: relative; flex-shrink: 0; }
+.todo-btn {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 42px; height: 42px;
+  border: var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--paper);
+  box-shadow: var(--shadow-cta);
+  cursor: pointer;
+  transition: transform .08s ease, box-shadow .08s ease, background .15s;
+}
+.todo-btn .spot-icon-art { width: 28px; height: 28px; }
+.todo-btn:hover, .todo-btn[aria-expanded="true"] { transform: translate(2px, 2px); box-shadow: none; background: var(--primary-soft); }
+.todo-count {
+  position: absolute;
+  top: -8px; right: -8px;
+  min-width: 20px; height: 20px;
+  padding: 0 5px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: #FB7185;
+  color: var(--ink);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.todo-panel {
+  position: absolute;
+  top: calc(100% + 12px); right: 0;
+  z-index: 60;
+  width: 340px;
+  padding: 14px;
+  border: 3px solid var(--ink);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  box-shadow: 4px 4px 0 var(--ink);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.todo-head { display: flex; align-items: center; gap: 8px; }
+.todo-head h2 { margin: 0; font-size: 16px; font-weight: 900; }
+.todo-progress { margin-right: auto; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.todo-form { display: flex; gap: 8px; }
+.todo-form .field { flex: 1; min-width: 0; height: 40px; }
+.todo-form .btn-primary { height: 40px; padding: 0 16px; }
+.todo-list { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.todo-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+}
+.todo-check { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 32px; cursor: pointer; }
+.todo-check input { position: absolute; opacity: 0; pointer-events: none; }
+.todo-box { flex-shrink: 0; width: 20px; height: 20px; border: 2px solid var(--ink); border-radius: 5px; background: var(--paper); display: grid; place-items: center; }
+.todo-check input:checked + .todo-box { background: var(--mint, #86EFAC); }
+.todo-check input:checked + .todo-box::after { content: ""; width: 9px; height: 5px; border-left: 2.5px solid var(--ink); border-bottom: 2.5px solid var(--ink); transform: translateY(-1px) rotate(-45deg); }
+.todo-check input:focus-visible + .todo-box { outline: 2px solid var(--focus); outline-offset: 2px; }
+.todo-text { font-size: 14px; font-weight: 700; overflow-wrap: anywhere; }
+.todo-item.done { border-color: var(--edge); background: transparent; }
+.todo-item.done .todo-text { color: var(--muted); text-decoration: line-through; }
+.todo-remove { width: 28px; height: 28px; }
+.todo-remove svg { width: 13px; height: 13px; }
+.todo-empty { padding: 10px 4px; font-size: 13px; color: var(--muted); }
+.todo-clear { align-self: flex-start; }
+
 /* 手機專用元素：桌面版不顯示 */
 .sheet-handle, .next-stop, .avatar-btn, .mobile-panel, .search-cancel, .swipe-actions, .leg-mobile { display: none; }
 
@@ -1593,6 +1670,23 @@ button.spot-index:hover { transform: scale(1.12); }
   .swipe-actions .danger { background: var(--danger); color: var(--paper); }
   .swipe-actions svg { width: 18px; height: 18px; }
   .spot-menu { top: 56px; }
+  .todo-btn { width: 44px; height: 44px; box-shadow: none; border-width: 2px; }
+  .todo-count { top: -6px; right: -6px; }
+  .todo-panel {
+    position: fixed;
+    top: auto; left: 0; right: 0; bottom: 0;
+    z-index: 960;
+    width: auto;
+    max-height: 80%;
+    padding: 16px var(--gutter-r) calc(16px + var(--safe-bottom)) var(--gutter-l);
+    border-width: 2px 0 0;
+    border-radius: 20px 20px 0 0;
+    box-shadow: 0 -2px 0 var(--ink);
+  }
+  .todo-form .field, .todo-form .btn-primary { height: 46px; font-size: 16px; }
+  .todo-list { max-height: none; flex: 1; }
+  .todo-check { min-height: 40px; }
+  .todo-remove { width: 44px; height: 44px; }
   .note-chip { min-height: 26px; position: relative; }
   .note-chip::after { content: ""; position: absolute; inset: -9px -4px; }
   .note-modal { top: auto; bottom: 0; left: 0; width: 100%; max-height: 92%; border-width: 2px 0 0; border-radius: 20px 20px 0 0; transform: none;
@@ -1680,3 +1774,6 @@ button.spot-index:hover { transform: scale(1.12); }
   .map-chip { height: 44px; }
   .drawer-head .icon-btn { width: 44px; height: 44px; }
 }
+
+/* 手機待辦清單的背景要在導覽列（z 700，面板在其中）之下、行程抽屜之上 */
+#todo-backdrop { z-index: 695; }
