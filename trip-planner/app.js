@@ -59,7 +59,8 @@ const SPOT_ICONS = [
   { value: '☕', label: '咖啡甜點' },
   { value: '📷', label: '景點拍照' },
   { value: '🏞️', label: '自然風景' },
-  { value: '🛍️', label: '購物採買' }
+  { value: '🛍️', label: '購物採買' },
+  { value: '🚉', label: '交通／車站' }
 ];
 
 // 2D 扁平復古貼紙圖示（32×32，粗黑外框、高飽和配色）；外框色與線寬由 renderSpotIcon 的 <g> 統一設定
@@ -98,7 +99,14 @@ const SPOT_ICON_ART = {
   '🛍️': `<path d="M17 10.5V8.5a3.5 3.5 0 0 1 7 0v2"/>
     <path d="M14 10.5h13l-1.2 16.5H14.8z" fill="#86EFAC"/>
     <path d="M7.5 14v-2.5a3.5 3.5 0 0 1 7 0V14"/>
-    <path d="M4.5 14h13l-1 14h-11z" fill="#FDA4AF"/>`
+    <path d="M4.5 14h13l-1 14h-11z" fill="#FDA4AF"/>`,
+  '🚉': `<path d="M13 4.5V2.5h6v2"/>
+    <path d="M10.5 24.5 7 29M21.5 24.5 25 29M8.5 27.5h15"/>
+    <rect x="6.5" y="4.5" width="19" height="20" rx="5" fill="#3B82F6"/>
+    <rect x="9.5" y="8" width="13" height="7" rx="1.5" fill="#BAE6FD"/>
+    <circle cx="11.5" cy="19.5" r="1.8" fill="#FDE047"/>
+    <circle cx="20.5" cy="19.5" r="1.8" fill="#FDE047"/>
+    <path d="M14.5 19.5h3"/>`
 };
 
 // 景點圖示：有自訂類別時畫 SVG 貼紙，否則顯示 fallback（通常是順序編號）

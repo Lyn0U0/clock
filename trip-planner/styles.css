@@ -589,10 +589,10 @@ button.spot-index:hover { transform: scale(1.12); }
 .spot-index .spot-icon-art { width: 20px; height: 20px; }
 .next-stop .spot-index .spot-icon-art { width: 22px; height: 22px; }
 
-/* 景點類別彈窗：米杏底、粗黑框、4×2 貼紙卡片 */
+/* 景點類別彈窗：米杏底、粗黑框、3×3 貼紙卡片 */
 .icon-picker {
   top: 46px; left: 8px;
-  width: 324px;
+  width: 276px;
   padding: 12px;
   border: 3px solid var(--ink);
   border-radius: var(--r-lg);
@@ -601,7 +601,7 @@ button.spot-index:hover { transform: scale(1.12); }
   gap: 10px;
 }
 .ip-title { margin: 0 2px; font-size: 13px; font-weight: 900; letter-spacing: .06em; }
-.ip-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.ip-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .ip-card {
   display: flex;
   flex-direction: column;
