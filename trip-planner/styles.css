@@ -1909,15 +1909,17 @@ button.spot-index:hover { transform: scale(1.12); }
 }
 
 /* 待確認：景點與交通 */
+/* 待確認用橘色：一眼和一般標籤（黃色）、預約時間（紅色）分開 */
+:root { --pending: #EA580C; --pending-soft: #FFEDD5; }
 .time-chip.tentative, .leg-tag.pending {
-  border-style: dashed; background: var(--paper); color: var(--ink); font-weight: 800;
+  border: 2px dashed var(--pending); background: var(--pending-soft); color: #9A3412; font-weight: 800;
 }
-.time-chip.tentative:hover, .leg-tag.pending:hover { background: var(--primary-soft); }
+.time-chip.tentative:hover, .leg-tag.pending:hover { background: #FED7AA; }
 .pin.tentative { border-style: dashed; }
 .pin .pin-q {
   position: absolute; top: -9px; right: -9px; transform: rotate(45deg);
   width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink);
-  background: var(--paper); color: var(--ink); font: 900 10px/12px var(--font); text-align: center;
+  background: var(--pending); color: #FFFFFF; font: 900 10px/12px var(--font); text-align: center;
 }
 .pin { position: relative; }
 .leg-notime { color: var(--muted); font-weight: 700; }

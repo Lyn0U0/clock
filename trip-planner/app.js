@@ -4229,7 +4229,7 @@ const HANDBOOK_CSS = `
 .hb-leg-time { font-weight:900; }
 .hb-api { margin-left:6px; font-weight:500; color:var(--muted); text-decoration:line-through; }
 .hb-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
-.hb-pending { background:#fff; border-style:dashed; margin-left:6px; vertical-align:middle; }
+.hb-pending { background:#FFEDD5; color:#9A3412; border-color:#EA580C; border-style:dashed; margin-left:6px; vertical-align:middle; }
 .hb-tag { padding:1px 8px; border:1.5px solid var(--ink); border-radius:999px; background:var(--yellow-soft); font-size:12px; font-weight:700; }
 .hb-transit { margin-top:6px; }
 .hb-transit summary { cursor:pointer; font-size:12px; font-weight:700; color:var(--muted); }
