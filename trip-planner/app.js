@@ -1257,6 +1257,7 @@ function renderSpotCard(spot, index, total) {
           <div class="menu spot-menu" role="menu">
             <button role="menuitem" data-action="open-note">${ICONS.note}${hasNote ? '編輯備註' : '新增備註'}</button>
             <button role="menuitem" data-action="edit-spot-time">${ICONS.clock}${spot.time ? '修改時間' : '設定時間'}</button>
+            <button role="menuitem" data-action="repeat-spot">${ICONS.copy}這天再去一次（加到最後）</button>
             <button role="menuitem" data-action="copy-spot">${ICONS.copy}複製到其他天…</button>
             <button role="menuitem" data-action="move-up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}往前移</button>
             <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
@@ -1628,6 +1629,7 @@ function handleAction(btn, spotId) {
       break;
     }
     case 'copy-spot': openCopyModal(spotId); break;
+    case 'repeat-spot': repeatSpotInDay(spotId); break;
     case 'edit-spot-time': openNoteModal(spotId, 'time'); break;
     case 'edit-leg': {
       const leg = btn.closest('.leg');
@@ -2754,6 +2756,18 @@ function copySpotToDays(spotId, dayIds, position) {
   });
   if (added) commit();
   return added;
+}
+
+// 同一天再去一次（例如來回同一個公車站）：複製一份加到當天最後，之後可拖曳到想要的位置
+function repeatSpotInDay(spotId) {
+  const found = findSpot(spotId);
+  if (!found) return;
+  const src = found.spot;
+  const spot = { ...createSpot(src), icon: src.icon, note: src.note, detailedNotes: src.detailedNotes };
+  found.day.spots.push(spot);
+  ui.flashSpotId = spot.id;
+  commit();
+  requestAnimationFrame(() => document.querySelector(`.spot[data-spot-id="${spot.id}"]`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
 }
 
 function openCopyModal(spotId) {
