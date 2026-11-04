@@ -243,6 +243,14 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
       </button>
     </header>
+    <div class="note-time-row" id="note-time-row">
+      <label class="note-time-field">
+        <span class="note-label">時間</span>
+        <input class="field" id="note-time" type="time" aria-label="幾點">
+      </label>
+      <button type="button" class="link-btn" id="note-time-clear" hidden>清除時間</button>
+      <label class="leg-check note-reserved"><input type="checkbox" id="note-reserved"><span>這是預約時間（需準時抵達）</span></label>
+    </div>
     <label class="note-field">
       <span class="note-label">簡短備註 <small>會顯示在行程卡片上</small><span class="note-count" id="note-count"></span></span>
       <input class="field" id="note-short" type="text" maxlength="40" autocomplete="off"

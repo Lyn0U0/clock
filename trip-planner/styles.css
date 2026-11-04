@@ -1874,3 +1874,36 @@ button.spot-index:hover { transform: scale(1.12); }
 .copy-here { margin-left: auto; }
 .copy-status { color: var(--danger); font-weight: 700; }
 .copy-status:empty { display: none; }
+
+/* 景點時間：卡片上的時間標籤，預約時間用紅色提醒 */
+.spot-chips { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; max-width: 100%; min-width: 0; }
+.spot-chips .note-chip { min-width: 0; }
+.time-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 2px;
+  padding: 1px 8px 1px 6px;
+  border: 1.5px solid var(--ink);
+  border-radius: 6px;
+  background: var(--paper);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.6;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.time-chip svg { width: 12px; height: 12px; }
+.time-chip.reserved { border-color: var(--danger); background: var(--danger-soft); color: var(--danger); }
+.time-chip:hover { background: var(--primary-soft); }
+.time-chip.reserved:hover { background: #FECDD3; }
+.note-time-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 14px; }
+.note-time-field { display: flex; flex-direction: column; gap: 6px; }
+.note-time-field .field { width: 140px; height: 42px; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.note-reserved { min-height: 42px; }
+@media (max-width: 760px) {
+  .time-chip { min-height: 26px; position: relative; }
+  .time-chip::after { content: ""; position: absolute; inset: -9px -4px; }
+  .note-time-field .field { height: 48px; font-size: 16px; }
+}

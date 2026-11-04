@@ -143,6 +143,7 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *   Spot = { id, name, lat, lng, placeId, icon, note, detailedNotes }
  *     spots 陣列順序就是當天的參觀順序；icon 為類別代號，空字串顯示編號
  *     note：簡短備註（單行，顯示在卡片上）；detailedNotes：詳細紀錄（多行，在備註視窗編輯）
+ *     time：'HH:MM' 或空字串（幾點到）；reserved：true 表示是預約時間，需準時抵達
  *   LegDetail = {
  *     transitNote,        // 車次、月台、轉乘指引、預約代碼
  *     customDuration,     // 手動覆寫的交通時間（分鐘）；null 表示用 Google Maps 預估
@@ -190,7 +191,7 @@ function createDay() {
 }
 
 function createSpot({ name, lat, lng, placeId }) {
-  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, icon: '', note: '', detailedNotes: '' };
+  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, icon: '', note: '', detailedNotes: '', time: '', reserved: false };
 }
 
 // 個人行程與每個共享行程各自有一份本機資料（共享行程的是雲端資料的快取）
@@ -227,6 +228,8 @@ function loadSharedCache() {
 
 // 早期版本的 note 是多行筆記：第一行留作簡短備註，其餘移到詳細紀錄
 function normalizeSpotNotes(spot) {
+  if (typeof spot.time !== 'string' || !/^\d{2}:\d{2}$/.test(spot.time)) spot.time = '';
+  spot.reserved = Boolean(spot.reserved && spot.time);
   if (typeof spot.note !== 'string') spot.note = '';
   if (typeof spot.detailedNotes !== 'string') {
     const [first, ...rest] = spot.note.split('\n');
@@ -703,11 +706,13 @@ function setSpotIcon(spotId, icon) {
 }
 
 // 備註視窗按「儲存」：寫回景點、重繪清單與圖釘，並照常存到本機（共享行程同步到雲端）
-function saveSpotNotes(spotId, note, detailedNotes) {
+function saveSpotNotes(spotId, note, detailedNotes, time = '', reserved = false) {
   const found = findSpot(spotId);
   if (!found) return false;
   found.spot.note = note.trim();
   found.spot.detailedNotes = detailedNotes.replace(/\s+$/, '');
+  found.spot.time = /^\d{2}:\d{2}$/.test(time) ? time : '';
+  found.spot.reserved = Boolean(reserved && found.spot.time);
   ui.flashSpotId = spotId;
   commit();
   return true;
@@ -1025,6 +1030,7 @@ const ICONS = {
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
   note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
   copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
   memo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
@@ -1213,7 +1219,12 @@ function renderSpotCard(spot, index, total) {
           <button class="spot-info" data-action="focus-spot" title="在地圖上查看">
             <span class="spot-name">${escapeHtml(spot.name)}</span>
           </button>
-          ${renderNoteChip(spot)}
+          <div class="spot-chips">
+            ${spot.time ? `<button class="time-chip ${spot.reserved ? 'reserved' : ''}" data-action="edit-spot-time"
+              title="${spot.reserved ? '預約時間，需準時抵達' : '預計抵達時間'}（點一下修改）"
+              aria-label="${spot.reserved ? '預約' : '預計'} ${spot.time}，點一下修改">${ICONS.clock}${spot.reserved ? '預約 ' : ''}${spot.time}</button>` : ''}
+            ${renderNoteChip(spot)}
+          </div>
         </div>
         ${renderExpenseBadge(ref, spot.name)}
         <button class="icon-btn spot-more ${menuOpen ? 'on' : ''}" data-action="toggle-spot-menu"
@@ -1234,6 +1245,7 @@ function renderSpotCard(spot, index, total) {
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
             <button role="menuitem" data-action="open-note">${ICONS.note}${hasNote ? '編輯備註' : '新增備註'}</button>
+            <button role="menuitem" data-action="edit-spot-time">${ICONS.clock}${spot.time ? '修改時間' : '設定時間'}</button>
             <button role="menuitem" data-action="copy-spot">${ICONS.copy}複製到其他天…</button>
             <button role="menuitem" data-action="move-up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}往前移</button>
             <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
@@ -1551,7 +1563,7 @@ function onActionClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
   // 備註標籤在卡片裡：只開備註視窗，不要再觸發卡片或文件層級的其他點擊處理（地圖聚焦、收合選單等）
-  if (btn.dataset.action === 'open-note' || btn.dataset.action === 'edit-leg') e.stopPropagation();
+  if (['open-note', 'edit-leg', 'edit-spot-time'].includes(btn.dataset.action)) e.stopPropagation();
   const spotId = btn.closest('.spot')?.dataset.spotId;
   const fromSpotMenu = Boolean(btn.closest('.spot-menu'));
   if (fromSpotMenu) ui.spotMenuId = null; // 選了選單項目就收起選單
@@ -1601,6 +1613,7 @@ function handleAction(btn, spotId) {
       break;
     }
     case 'copy-spot': openCopyModal(spotId); break;
+    case 'edit-spot-time': openNoteModal(spotId, 'time'); break;
     case 'edit-leg': {
       const leg = btn.closest('.leg');
       openLegModal(leg.dataset.from, leg.dataset.to);
@@ -2324,7 +2337,8 @@ function createPinElement(dayIndex, spotIndex, dimmed, icon) {
 }
 
 function getMarkerTitle({ dayIndex, spot }) {
-  return `${getDayLabel(dayIndex)}・${spot.name}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`; // 圖釘提示只放簡短備註
+  const time = spot.time ? `${spot.reserved ? '預約 ' : ''}${spot.time} ` : '';
+  return `${getDayLabel(dayIndex)}・${time}${spot.name}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`; // 圖釘提示只放時間與簡短備註
 }
 
 function updateMarkerTitle(found) {
@@ -2531,7 +2545,8 @@ function renderNoteText(text) {
   return blocks.map(b => (Array.isArray(b) ? `<ul>${b.join('')}</ul>` : b)).join('');
 }
 
-function openNoteModal(spotId) {
+// focus：'time' 時直接把游標放在時間欄（「⋯」選單的設定時間）
+function openNoteModal(spotId, focus) {
   const found = findSpot(spotId);
   if (!found) return;
   const { spot, dayIndex, index } = found;
@@ -2559,8 +2574,16 @@ function openNoteModal(spotId) {
   ui.spotMenuId = null;
   noteModal.el.hidden = false;
   noteModal.backdrop.hidden = false;
-  short.focus();
-  short.setSelectionRange(short.value.length, short.value.length);
+  document.getElementById('note-time-row').hidden = false;
+  document.getElementById('note-time').value = spot.time;
+  document.getElementById('note-reserved').checked = spot.reserved;
+  updateNoteTimeState();
+  if (focus === 'time') {
+    document.getElementById('note-time').focus();
+  } else {
+    short.focus();
+    short.setSelectionRange(short.value.length, short.value.length);
+  }
 }
 
 function closeNoteModal() {
@@ -2586,6 +2609,7 @@ function openDayNoteModal(dayId) {
   document.getElementById('note-where').textContent = `${day.spots.length} 個景點${renderDayTravel(day) ? `・${renderDayTravel(day)}` : ''}`;
   document.getElementById('note-map-link').hidden = true;
   document.getElementById('note-sep').hidden = true;
+  document.getElementById('note-time-row').hidden = true; // 時間只屬於景點
   const icon = document.getElementById('note-icon');
   icon.textContent = dayIndex + 1;
   icon.style.setProperty('--c', getDayColor(dayIndex));
@@ -2617,10 +2641,20 @@ function submitNoteModal() {
   }
   const spotId = noteModal.spotId;
   if (!spotId) return;
-  const ok = saveSpotNotes(spotId, document.getElementById('note-short').value, document.getElementById('note-detail').value);
+  const ok = saveSpotNotes(spotId, document.getElementById('note-short').value, document.getElementById('note-detail').value,
+    document.getElementById('note-time').value, document.getElementById('note-reserved').checked);
   noteModal.returnFocus = null;
   closeNoteModal();
   if (ok) document.querySelector(`.spot[data-spot-id="${spotId}"] .note-chip`)?.focus();
+}
+
+// 沒填時間時「預約時間」不能勾
+function updateNoteTimeState() {
+  const time = document.getElementById('note-time');
+  const reserved = document.getElementById('note-reserved');
+  reserved.disabled = !time.value;
+  if (!time.value) reserved.checked = false;
+  document.getElementById('note-time-clear').hidden = !time.value;
 }
 
 function updateNoteCounter() {
@@ -2648,6 +2682,12 @@ noteModal.el.addEventListener('click', e => {
 });
 noteModal.backdrop.addEventListener('click', closeNoteModal);
 document.getElementById('note-short').addEventListener('input', updateNoteCounter);
+document.getElementById('note-time').addEventListener('input', updateNoteTimeState);
+document.getElementById('note-time-clear').addEventListener('click', () => {
+  document.getElementById('note-time').value = '';
+  updateNoteTimeState();
+  document.getElementById('note-time').focus();
+});
 noteModal.el.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     e.stopPropagation(); // 只關備註視窗，不要連帶關掉其他選單
@@ -3124,7 +3164,7 @@ function renderNextStop() {
     <span class="spot-index ${spot.icon ? 'has-icon' : ''}">${renderSpotIcon(spot.icon, 1)}</span>
     <span class="next-text">
       <span class="next-label">下一站・${getDayLabel(dayIndex)}${getDayDateText(dayIndex) ? ` ${getDayDateText(dayIndex)}` : ''}</span>
-      <span class="next-name">${escapeHtml(spot.name)}</span>
+      <span class="next-name">${spot.time ? `${spot.time} ` : ''}${escapeHtml(spot.name)}</span>
     </span>
     <span class="next-meta">${day.spots.length} 站${travel ? `<br>${travel}` : ''}</span>`;
 }
@@ -3848,7 +3888,7 @@ function buildHandbook({ print = false } = {}) {
       const card = `<li class="hb-spot">
           <span class="hb-icon" style="background:${spot.icon ? '#FFFFFF' : getDayColor(i)}">${renderSpotIcon(spot.icon, j + 1)}</span>
           <div class="hb-spot-body">
-            <h3>${escapeHtml(spot.name)}</h3>
+            <h3>${spot.time ? `<span class="hb-time ${spot.reserved ? 'reserved' : ''}">${spot.reserved ? '預約 ' : ''}${spot.time}</span>` : ''}${escapeHtml(spot.name)}</h3>
             ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim())}</p>` : ''}
             ${spot.detailedNotes.trim() ? `<div class="hb-detail">${renderNoteText(spot.detailedNotes)}</div>` : ''}
             ${renderHandbookExpenses(getSpotRef(spot))}
@@ -3920,6 +3960,8 @@ const HANDBOOK_CSS = `
 .hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; font-weight:700; }
 .hb-detail { margin:6px 0 0; padding:8px 10px; border:1.5px dashed var(--edge); border-radius:8px; font-size:12.5px; }
 .hb-day-note { margin:0 0 10px 22px; }
+.hb-time { display:inline-block; margin-right:8px; padding:0 8px; border:1.5px solid var(--ink); border-radius:999px; font-size:12px; font-variant-numeric:tabular-nums; }
+.hb-time.reserved { background:#FFE4E6; color:#E11D48; border-color:#E11D48; }
 .hb-detail p { margin:0 0 4px; } .hb-detail ul { margin:0 0 4px; padding-left:18px; } .hb-detail a { color:#2563EB; word-break:break-all; }
 .hb-leg { margin-left:26px; padding:8px 0 8px 18px; border-left:2px dashed #A8A090; font-size:13px; break-inside:avoid; }
 .hb-leg-mode { font-weight:700; margin-right:8px; }
