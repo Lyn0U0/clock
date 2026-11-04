@@ -2907,13 +2907,16 @@ function submitLegModal() {
   closeLegModal();
 }
 
-// 重設：交通方式回到預設、時間改回 Google 預估；車次備註與費用保留
+// 重設：交通方式回到預設、時間改回 Google 預估，並立刻儲存、關閉視窗
+// （之前只改表單、還要再按儲存，按取消或關閉就等於沒重設）；車次備註、費用、待確認保留
 function resetLegModal() {
   const form = legModal.el;
   form.elements.mode.value = getTravelMode().value;
   form.elements.timeMode.value = form.elements.mode.value === 'CUSTOM' ? 'none' : 'api';
   form.elements.customDuration.value = '';
+  form.elements.customDuration.classList.remove('invalid');
   updateLegModalState();
+  submitLegModal();
 }
 
 legModal.el.addEventListener('submit', e => {
