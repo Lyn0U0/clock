@@ -644,27 +644,86 @@ button.spot-index:hover { transform: scale(1.12); }
   cursor: pointer;
 }
 .spot-name { font-size: 14px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.spot-note-preview { font-size: 11px; font-weight: 500; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .spot-more { opacity: 0; transition: opacity .15s, background .15s, border-color .15s; }
 .spot:hover .spot-more, .spot:focus-within .spot-more, .spot-more.on { opacity: 1; }
 @media (hover: none) { .spot-more { opacity: 1; } }
 .spot-menu { top: 46px; right: 6px; }
 .spot-row { position: relative; }
-.spot-note { padding: 0 10px 10px 54px; }
-.spot-note textarea {
-  width: 100%;
-  resize: vertical;
-  min-height: 64px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.6;
-  padding: 8px 10px;
-  border: var(--line-faint);
-  border-radius: var(--r-sm);
+/* 卡片上的備註標籤：名稱下方一行，有備註顯示摘要，沒有則是低調的「+ 備註」 */
+.spot-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.spot-text .spot-info { flex: none; width: 100%; }
+.note-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  margin-left: 2px;
+  padding: 1px 8px 1px 6px;
+  border: 1.5px solid var(--edge);
+  border-radius: 6px;
   background: var(--primary-soft);
-  outline: none;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.6;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color .15s, background .15s, color .15s;
 }
-.spot-note textarea:focus { border-color: var(--ink); box-shadow: var(--ring); }
+.note-chip svg { width: 12px; height: 12px; flex-shrink: 0; }
+.note-chip-text { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-chip-more { flex-shrink: 0; padding: 0 4px; border-radius: 4px; background: var(--ink); color: var(--paper); font-size: 9px; }
+.note-chip:hover { border-color: var(--ink); color: var(--ink); }
+.note-chip.empty { border-style: dashed; background: transparent; color: var(--muted); opacity: .55; }
+.note-chip.empty::before { content: "+"; font-weight: 900; }
+.spot:hover .note-chip.empty, .spot:focus-within .note-chip.empty, .note-chip.empty:focus-visible { opacity: 1; }
+.note-chip.empty:hover { background: var(--paper); color: var(--ink); }
+@media (hover: none) { .note-chip.empty { opacity: 1; } }
+
+/* 景點備註視窗 */
+.note-modal {
+  position: fixed;
+  top: 50%; left: 50%;
+  z-index: 950;
+  width: min(560px, calc(100% - 32px));
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  margin: 0;
+  padding: 20px;
+  border: var(--line-strong);
+  border-radius: 20px;
+  background: var(--bg);
+  box-shadow: var(--shadow-pop);
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.note-head { display: flex; align-items: center; gap: 12px; }
+.note-icon { width: 40px; height: 40px; font-size: 16px; background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--ink), 0 0 0 3px var(--c); }
+.note-icon .spot-icon-art { width: 28px; height: 28px; }
+.note-titles { flex: 1; min-width: 0; }
+.note-titles h2 { margin: 0; font-size: 19px; font-weight: 900; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.note-titles p { margin: 0; font-size: 12px; font-weight: 700; color: var(--muted); }
+.note-titles a { color: var(--focus); }
+.note-field { display: flex; flex-direction: column; gap: 6px; }
+.note-label { display: flex; align-items: baseline; gap: 8px; font-size: 13px; font-weight: 900; }
+.note-label small { font-size: 11px; font-weight: 500; color: var(--muted); }
+.note-count { margin-left: auto; font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+.note-preview-toggle { margin-left: auto; }
+.note-field .field { width: 100%; }
+#note-short { height: 42px; font-size: 15px; font-weight: 700; }
+.note-detail { height: auto; min-height: 180px; padding: 10px 12px; resize: vertical; font-size: 14px; line-height: 1.7; }
+.note-preview { min-height: 180px; padding: 10px 14px; border: var(--line-faint); border-radius: var(--r-sm); background: var(--paper); font-size: 14px; line-height: 1.7; overflow-wrap: anywhere; }
+.note-preview p { margin: 0 0 6px; }
+.note-preview ul { margin: 0 0 6px; padding-left: 20px; }
+.note-preview a { color: var(--focus); }
+.note-preview-empty { color: var(--muted); }
+.note-hint { margin: 0; font-size: 11px; color: var(--muted); }
+.note-foot { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.note-shortcut { margin-right: auto; font-size: 11px; color: var(--muted); }
+.note-shortcut kbd { padding: 0 4px; border: 1px solid var(--edge-strong); border-radius: 4px; background: var(--paper); font-family: inherit; font-size: 10px; }
+.note-foot .btn-text { height: 42px; padding: 0 16px; font-size: 14px; }
 
 /* 記帳小標籤 */
 .expense-badge {
@@ -1534,7 +1593,14 @@ button.spot-index:hover { transform: scale(1.12); }
   .swipe-actions .danger { background: var(--danger); color: var(--paper); }
   .swipe-actions svg { width: 18px; height: 18px; }
   .spot-menu { top: 56px; }
-  .spot-note { padding: 0 10px 10px; }
+  .note-chip { min-height: 26px; position: relative; }
+  .note-chip::after { content: ""; position: absolute; inset: -9px -4px; }
+  .note-modal { top: auto; bottom: 0; left: 0; width: 100%; max-height: 92%; border-width: 2px 0 0; border-radius: 20px 20px 0 0; transform: none;
+    padding-bottom: calc(16px + var(--safe-bottom)); }
+  .note-shortcut { display: none; }
+  #note-short { height: 48px; font-size: 16px; }
+  .note-detail { font-size: 16px; }
+  .note-foot .btn-text, .note-foot .btn-primary { height: 48px; flex: 1; }
 
   /* 小標籤用透明熱區補足 44px */
   .expense-badge, .leg-pill, .member-remove, .link-btn { position: relative; }

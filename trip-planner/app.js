@@ -126,7 +126,9 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     members: [{ id, name }],                                // 旅伴，預設只有「我」
  *     expenses: [Expense]                                     // 記帳
  *   }
- *   Spot = { id, name, lat, lng, placeId, note, icon }  // spots 陣列順序就是當天的參觀順序；icon 為 Emoji，空字串顯示編號
+ *   Spot = { id, name, lat, lng, placeId, icon, note, detailedNotes }
+ *     spots 陣列順序就是當天的參觀順序；icon 為類別代號，空字串顯示編號
+ *     note：簡短備註（單行，顯示在卡片上）；detailedNotes：詳細紀錄（多行，在備註視窗編輯）
  *   Expense = {
  *     id, title, amount, paidBy: memberId,
  *     ref: 'spot:<spotId>' | 'leg:<fromSpotId>-><toSpotId>',  // 掛在哪張卡片上
@@ -143,7 +145,6 @@ let state = loadState();
 
 // 只影響畫面、不需要儲存的狀態
 const ui = {
-  expandedNotes: new Set(), // 展開備註欄的 spotId
   flashSpotId: null,        // 下次重繪後要閃一下的卡片
   lastPickedDayId: null,    // 新增表單預設選取的天數
   expandedExpenses: new Set(), // 展開記帳區的卡片 ref
@@ -167,7 +168,7 @@ function createDay() {
 }
 
 function createSpot({ name, lat, lng, placeId }) {
-  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, note: '', icon: '' };
+  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, icon: '', note: '', detailedNotes: '' };
 }
 
 // 個人行程與每個共享行程各自有一份本機資料（共享行程的是雲端資料的快取）
@@ -202,6 +203,16 @@ function loadSharedCache() {
   return normalizeState({ days: [createDay()], activeDayId: OVERVIEW });
 }
 
+// 早期版本的 note 是多行筆記：第一行留作簡短備註，其餘移到詳細紀錄
+function normalizeSpotNotes(spot) {
+  if (typeof spot.note !== 'string') spot.note = '';
+  if (typeof spot.detailedNotes !== 'string') {
+    const [first, ...rest] = spot.note.split('\n');
+    spot.note = first.trim();
+    spot.detailedNotes = rest.join('\n').trim();
+  }
+}
+
 // 補上舊資料沒有的欄位（旅伴、記帳）
 function normalizeState(s) {
   if (!Array.isArray(s.members) || s.members.length < MIN_MEMBERS) s.members = DEFAULT_MEMBERS.map(m => ({ ...m }));
@@ -209,6 +220,7 @@ function normalizeState(s) {
   if (typeof s.tripName !== 'string') s.tripName = '';
   s.days.forEach(day => day.spots.forEach(spot => {
     if (!SPOT_ICONS.some(i => i.value === spot.icon)) spot.icon = '';
+    normalizeSpotNotes(spot);
   }));
   if (typeof s.startDate !== 'string') s.startDate = '';
   return s;
@@ -223,7 +235,7 @@ function migrateLegacySpots() {
     const days = Array.from({ length: dayCount }, createDay);
     legacy.forEach(s => {
       const day = days[(Number(s.day) || 1) - 1];
-      day.spots.push({ id: s.id, name: s.name, lat: s.lat, lng: s.lng, placeId: s.placeId || null, note: '' });
+      day.spots.push({ id: s.id, name: s.name, lat: s.lat, lng: s.lng, placeId: s.placeId || null, note: '', detailedNotes: '' });
     });
     return { days, activeDayId: OVERVIEW };
   } catch {
@@ -388,7 +400,6 @@ function removeDay(dayId) {
     const ok = confirm(`確定刪除 ${getDayLabel(index)}？\n這天的 ${day.spots.length} 個景點也會一併刪除，後面的天數會往前遞補。${expenseNote}`);
     if (!ok) return;
   }
-  day.spots.forEach(s => ui.expandedNotes.delete(s.id));
   state.days.splice(index, 1);
   if (state.activeDayId === dayId) {
     state.activeDayId = (state.days[index] || state.days[index - 1]).id;
@@ -420,7 +431,6 @@ function setTripEnd(value) {
       const ok = confirm(`縮短行程會刪除 ${labels}，以及這幾天的 ${spotCount} 個景點和相關花費，確定嗎？`);
       if (!ok) return render();
     }
-    removed.forEach(d => d.spots.forEach(s => ui.expandedNotes.delete(s.id)));
     state.days = state.days.slice(0, count);
     if (!getDay(state.activeDayId)) state.activeDayId = OVERVIEW;
   }
@@ -562,7 +572,6 @@ function removeSpot(spotId) {
   if (!found) return;
   const ok = applyWithExpenseGuard(() => found.day.spots.splice(found.index, 1), `刪除「${found.spot.name}」`);
   if (!ok) return;
-  ui.expandedNotes.delete(spotId);
   commit();
 }
 
@@ -595,22 +604,15 @@ function setSpotIcon(spotId, icon) {
   commit(); // 卡片、下一站卡片、地圖圖釘一起更新
 }
 
-// 打字時只更新資料並儲存，不整個重繪，避免輸入框失去焦點
-function updateSpotNote(spotId, note) {
+// 備註視窗按「儲存」：寫回景點、重繪清單與圖釘，並照常存到本機（共享行程同步到雲端）
+function saveSpotNotes(spotId, note, detailedNotes) {
   const found = findSpot(spotId);
-  if (!found) return;
-  found.spot.note = note;
-  saveState();
-  updateMarkerTitle(found);
-}
-
-function toggleNoteEditor(spotId) {
-  if (ui.expandedNotes.has(spotId)) ui.expandedNotes.delete(spotId);
-  else ui.expandedNotes.add(spotId);
-  render();
-  if (ui.expandedNotes.has(spotId)) {
-    document.querySelector(`.spot[data-spot-id="${spotId}"] textarea`)?.focus();
-  }
+  if (!found) return false;
+  found.spot.note = note.trim();
+  found.spot.detailedNotes = detailedNotes.replace(/\s+$/, '');
+  ui.flashSpotId = spotId;
+  commit();
+  return true;
 }
 
 
@@ -914,6 +916,7 @@ const ICONS = {
   chevronRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
   note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
+  memo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
   DRIVE: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M7.5 13h.01M16.5 13h.01"/></svg>',
@@ -1065,13 +1068,21 @@ function renderDaySpots(day) {
   }).join('');
 }
 
+// 卡片上的備註標籤：有備註顯示單行摘要（只有詳細紀錄時顯示其第一行），沒有則是低調的「+ 備註」
+function renderNoteChip(spot) {
+  const summary = spot.note.trim() || spot.detailedNotes.trim().split('\n')[0];
+  const hasDetail = Boolean(spot.detailedNotes.trim());
+  if (!summary) {
+    return `<button class="note-chip empty" data-action="open-note" aria-label="為 ${escapeHtml(spot.name)} 新增備註">${ICONS.memo}備註</button>`;
+  }
+  return `<button class="note-chip" data-action="open-note" title="${escapeHtml(summary)}" aria-label="編輯 ${escapeHtml(spot.name)} 的備註：${escapeHtml(summary)}">
+      ${ICONS.memo}<span class="note-chip-text">${escapeHtml(summary)}</span>${hasDetail ? '<span class="note-chip-more" aria-hidden="true">詳細</span>' : ''}
+    </button>`;
+}
+
 function renderSpotCard(spot, index, total) {
-  const expanded = ui.expandedNotes.has(spot.id);
-  const hasNote = Boolean(spot.note.trim());
+  const hasNote = Boolean(spot.note.trim() || spot.detailedNotes.trim());
   const menuOpen = ui.spotMenuId === spot.id;
-  const subline = hasNote && !expanded
-    ? `<span class="spot-note-preview">${escapeHtml(spot.note.split('\n')[0])}</span>`
-    : '';
   const ref = getSpotRef(spot);
   return `
     <li class="spot ${menuOpen ? 'menu-open' : ''} ${ui.swipeSpotId === spot.id ? 'swiped' : ''}" data-spot-id="${spot.id}">
@@ -1084,10 +1095,12 @@ function renderSpotCard(spot, index, total) {
         <span class="drag-handle" title="拖曳調整順序">${ICONS.grip}</span>
         <button class="spot-index ${spot.icon ? 'has-icon' : ''}" data-action="toggle-icon-picker" aria-haspopup="menu"
           aria-expanded="${ui.iconPickerSpotId === spot.id}" title="更換圖示" aria-label="第 ${index + 1} 站，更換圖示">${renderSpotIcon(spot.icon, index + 1)}</button>
-        <button class="spot-info" data-action="focus-spot" title="在地圖上查看">
-          <span class="spot-name">${escapeHtml(spot.name)}</span>
-          ${subline}
-        </button>
+        <div class="spot-text">
+          <button class="spot-info" data-action="focus-spot" title="在地圖上查看">
+            <span class="spot-name">${escapeHtml(spot.name)}</span>
+          </button>
+          ${renderNoteChip(spot)}
+        </div>
         ${renderExpenseBadge(ref, spot.name)}
         <button class="icon-btn spot-more ${menuOpen ? 'on' : ''}" data-action="toggle-spot-menu"
           title="更多操作" aria-label="${escapeHtml(spot.name)} 的更多操作" aria-haspopup="menu" aria-expanded="${menuOpen}">${ICONS.more}</button>
@@ -1106,16 +1119,11 @@ function renderSpotCard(spot, index, total) {
           </div>` : ''}
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
-            <button role="menuitem" data-action="toggle-note">${ICONS.note}${hasNote || expanded ? '編輯備註' : '新增備註'}</button>
+            <button role="menuitem" data-action="open-note">${ICONS.note}${hasNote ? '編輯備註' : '新增備註'}</button>
             <button role="menuitem" data-action="move-up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}往前移</button>
             <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
             <button role="menuitem" class="danger" data-action="remove-spot">${ICONS.trash}刪除景點</button>
           </div>` : ''}
-      ${expanded ? `
-        <div class="spot-note">
-          <textarea data-spot-id="${spot.id}" rows="3" maxlength="500"
-            placeholder="門票預約時間、必吃美食、隨手筆記…">${escapeHtml(spot.note)}</textarea>
-        </div>` : ''}
       ${renderExpensePanel(ref, spot.name)}
     </li>`;
 }
@@ -1402,6 +1410,8 @@ const dayListEl = document.getElementById('day-list');
 function onActionClick(e) {
   const btn = e.target.closest('[data-action]');
   if (!btn || btn.disabled) return;
+  // 備註標籤在卡片裡：只開備註視窗，不要再觸發卡片或文件層級的其他點擊處理（地圖聚焦、收合選單等）
+  if (btn.dataset.action === 'open-note') e.stopPropagation();
   const spotId = btn.closest('.spot')?.dataset.spotId;
   const fromSpotMenu = Boolean(btn.closest('.spot-menu'));
   if (fromSpotMenu) ui.spotMenuId = null; // 選了選單項目就收起選單
@@ -1443,7 +1453,7 @@ function handleAction(btn, spotId) {
     case 'remove-day': removeDay(btn.dataset.dayId); break;
     case 'move-up': moveSpotBy(spotId, -1); break;
     case 'move-down': moveSpotBy(spotId, 1); break;
-    case 'toggle-note': toggleNoteEditor(spotId); break;
+    case 'open-note': openNoteModal(spotId); break;
     case 'remove-spot': removeSpot(spotId); break;
     case 'focus-spot':
       focusSpotOnMap(spotId);
@@ -1544,9 +1554,7 @@ function closeNavMenu() {
 }
 
 dayListEl.addEventListener('input', e => {
-  if (e.target.matches('textarea[data-spot-id]')) {
-    updateSpotNote(e.target.dataset.spotId, e.target.value);
-  } else if (e.target.matches('.expense [data-field]')) {
+  if (e.target.matches('.expense [data-field]')) {
     updateExpense(e.target.closest('.expense').dataset.expenseId, e.target.dataset.field, e.target.value);
   }
 });
@@ -2164,7 +2172,7 @@ function createPinElement(dayIndex, spotIndex, dimmed, icon) {
 }
 
 function getMarkerTitle({ dayIndex, spot }) {
-  return `${getDayLabel(dayIndex)}・${spot.name}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`;
+  return `${getDayLabel(dayIndex)}・${spot.name}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`; // 圖釘提示只放簡短備註
 }
 
 function updateMarkerTitle(found) {
@@ -2332,6 +2340,128 @@ function drawDayRoute() {
   const pending = legs.some(({ leg }) => !leg || leg.status === 'loading');
   setRouteStatus(failed ? `有 ${failed} 段找不到路線，其餘路段已畫出` : pending ? '路線計算中…' : '');
 }
+
+
+/* ==========================================================================
+ * 8d. 景點備註視窗
+ *
+ * 卡片上的備註標籤（或「⋯」選單的編輯備註）打開這個視窗：
+ *   簡短備註（單行，同步顯示在卡片上）＋ 詳細紀錄（多行，支援簡易 Markdown：- 清單、**粗體**、網址自動變連結）。
+ * 「儲存」寫回景點並重繪；「取消」、Esc、點背景都不儲存。Cmd/Ctrl + Enter 快速儲存。
+ * ========================================================================== */
+
+const noteModal = {
+  el: document.getElementById('note-modal'),
+  backdrop: document.getElementById('note-backdrop'),
+  spotId: null,
+  returnFocus: null
+};
+
+// 詳細紀錄的簡易 Markdown：先跳脫 HTML，再處理清單、粗體與網址，不會執行任何使用者輸入的 HTML
+function renderNoteText(text) {
+  const inline = line => escapeHtml(line)
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  const blocks = [];
+  let list = null;
+  text.trim().split('\n').forEach(raw => {
+    const line = raw.trim();
+    const item = line.match(/^[-*・]\s+(.*)$/);
+    if (item) {
+      if (!list) blocks.push(list = []);
+      list.push(`<li>${inline(item[1])}</li>`);
+      return;
+    }
+    list = null;
+    if (line) blocks.push(`<p>${inline(line)}</p>`);
+  });
+  return blocks.map(b => (Array.isArray(b) ? `<ul>${b.join('')}</ul>` : b)).join('');
+}
+
+function openNoteModal(spotId) {
+  const found = findSpot(spotId);
+  if (!found) return;
+  const { spot, dayIndex, index } = found;
+  noteModal.spotId = spotId;
+  noteModal.returnFocus = document.activeElement;
+  const date = getDayDateText(dayIndex);
+  document.getElementById('note-title').textContent = spot.name;
+  document.getElementById('note-where').textContent = `${getDayLabel(dayIndex)}${date ? `・${date}` : ''}・第 ${index + 1} 站`;
+  document.getElementById('note-map-link').href = spot.placeId
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(spot.name)}&query_place_id=${encodeURIComponent(spot.placeId)}`
+    : `https://www.google.com/maps/search/?api=1&query=${spot.lat},${spot.lng}`;
+  const icon = document.getElementById('note-icon');
+  icon.innerHTML = renderSpotIcon(spot.icon, index + 1);
+  icon.style.setProperty('--c', getDayColor(dayIndex));
+  const short = document.getElementById('note-short');
+  const detail = document.getElementById('note-detail');
+  short.value = spot.note;
+  detail.value = spot.detailedNotes;
+  updateNoteCounter();
+  setNotePreview(false);
+  ui.spotMenuId = null;
+  noteModal.el.hidden = false;
+  noteModal.backdrop.hidden = false;
+  short.focus();
+  short.setSelectionRange(short.value.length, short.value.length);
+}
+
+function closeNoteModal() {
+  if (noteModal.el.hidden) return;
+  noteModal.el.hidden = true;
+  noteModal.backdrop.hidden = true;
+  noteModal.spotId = null;
+  // 回到原本的備註標籤（重繪後元素會換新，所以依景點重新找）
+  const back = noteModal.returnFocus?.isConnected ? noteModal.returnFocus : null;
+  (back || document.querySelector('.note-chip'))?.focus?.();
+}
+
+function submitNoteModal() {
+  const spotId = noteModal.spotId;
+  if (!spotId) return;
+  const ok = saveSpotNotes(spotId, document.getElementById('note-short').value, document.getElementById('note-detail').value);
+  noteModal.returnFocus = null;
+  closeNoteModal();
+  if (ok) document.querySelector(`.spot[data-spot-id="${spotId}"] .note-chip`)?.focus();
+}
+
+function updateNoteCounter() {
+  const short = document.getElementById('note-short');
+  document.getElementById('note-count').textContent = `${[...short.value].length}/${short.maxLength}`;
+}
+
+function setNotePreview(on) {
+  const detail = document.getElementById('note-detail');
+  const preview = document.getElementById('note-preview');
+  document.getElementById('note-preview-toggle').setAttribute('aria-pressed', String(on));
+  document.getElementById('note-preview-toggle').textContent = on ? '繼續編輯' : '預覽';
+  detail.hidden = on;
+  preview.hidden = !on;
+  if (on) preview.innerHTML = renderNoteText(detail.value) || '<p class="note-preview-empty">還沒有詳細紀錄</p>';
+}
+
+noteModal.el.addEventListener('submit', e => {
+  e.preventDefault();
+  submitNoteModal();
+});
+noteModal.el.addEventListener('click', e => {
+  if (e.target.closest('[data-action="close-note"]')) closeNoteModal();
+  if (e.target.closest('#note-preview-toggle')) setNotePreview(document.getElementById('note-detail').hidden === false);
+});
+noteModal.backdrop.addEventListener('click', closeNoteModal);
+document.getElementById('note-short').addEventListener('input', updateNoteCounter);
+noteModal.el.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.stopPropagation(); // 只關備註視窗，不要連帶關掉其他選單
+    closeNoteModal();
+  } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    submitNoteModal();
+  } else if (e.key === 'Enter' && e.target.id === 'note-short') {
+    e.preventDefault(); // 單行備註按 Enter 跳到詳細紀錄，避免誤送出
+    document.getElementById('note-detail').focus();
+  }
+});
 
 
 /* ==========================================================================
@@ -3169,7 +3299,8 @@ function buildHandbook({ print = false } = {}) {
           <span class="hb-icon" style="background:${spot.icon ? '#FFFFFF' : getDayColor(i)}">${renderSpotIcon(spot.icon, j + 1)}</span>
           <div class="hb-spot-body">
             <h3>${escapeHtml(spot.name)}</h3>
-            ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim()).replace(/\n/g, '<br>')}</p>` : ''}
+            ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim())}</p>` : ''}
+            ${spot.detailedNotes.trim() ? `<div class="hb-detail">${renderNoteText(spot.detailedNotes)}</div>` : ''}
             ${renderHandbookExpenses(getSpotRef(spot))}
           </div>
         </li>`;
@@ -3230,7 +3361,9 @@ const HANDBOOK_CSS = `
 .hb-icon svg { width:24px; height:24px; }
 .hb-icon { flex-shrink:0; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--ink); font-size:14px; font-weight:900; }
 .hb-spot-body { flex:1; min-width:0; }
-.hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; }
+.hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; font-weight:700; }
+.hb-detail { margin:6px 0 0; padding:8px 10px; border:1.5px dashed var(--edge); border-radius:8px; font-size:12.5px; }
+.hb-detail p { margin:0 0 4px; } .hb-detail ul { margin:0 0 4px; padding-left:18px; } .hb-detail a { color:#2563EB; word-break:break-all; }
 .hb-leg { margin-left:26px; padding:8px 0 8px 18px; border-left:2px dashed #A8A090; font-size:13px; break-inside:avoid; }
 .hb-leg-mode { font-weight:700; margin-right:8px; }
 .hb-leg-time { font-weight:900; }

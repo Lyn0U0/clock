@@ -211,6 +211,40 @@
     </div>
     <p class="export-status" id="export-status" role="status" hidden></p>
   </div>
+  <div class="drawer-backdrop" id="note-backdrop" hidden></div>
+  <form class="note-modal" id="note-modal" role="dialog" aria-modal="true" aria-labelledby="note-title" hidden>
+    <header class="note-head">
+      <span class="spot-index note-icon" id="note-icon" aria-hidden="true"></span>
+      <div class="note-titles">
+        <h2 id="note-title"></h2>
+        <p><span id="note-where"></span>・<a id="note-map-link" target="_blank" rel="noopener">在 Google 地圖查看</a></p>
+      </div>
+      <button type="button" class="icon-btn" data-action="close-note" aria-label="關閉" title="關閉（Esc）">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <label class="note-field">
+      <span class="note-label">簡短備註 <small>會顯示在行程卡片上</small><span class="note-count" id="note-count"></span></span>
+      <input class="field" id="note-short" type="text" maxlength="40" autocomplete="off"
+        placeholder="例如：需先出示 QR Code、推薦布丁">
+    </label>
+    <div class="note-field">
+      <span class="note-label">
+        <label for="note-detail">詳細紀錄</label>
+        <small>營業時間、必吃必買、預約編號、連結…</small>
+        <button type="button" class="link-btn note-preview-toggle" id="note-preview-toggle" aria-pressed="false">預覽</button>
+      </span>
+      <textarea class="field note-detail" id="note-detail" rows="8" maxlength="4000"
+        placeholder="- 營業時間 10:00–21:00（週一公休）&#10;- **必吃**：芒果冰、杏仁豆腐&#10;- 預約編號 A12345&#10;https://example.com/ticket"></textarea>
+      <div class="note-preview" id="note-preview" hidden></div>
+      <p class="note-hint">支援「- 」開頭的清單、**粗體**，網址會自動變成連結。</p>
+    </div>
+    <footer class="note-foot">
+      <span class="note-shortcut"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 儲存</span>
+      <button type="button" class="btn-text" data-action="close-note">取消</button>
+      <button type="submit" class="btn-primary">儲存</button>
+    </footer>
+  </form>
   <input type="file" id="import-file" accept="application/json,.json" hidden>
   <div id="print-root"></div>
 
