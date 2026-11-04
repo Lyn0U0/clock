@@ -248,6 +248,7 @@ function normalizeState(s) {
   if (!Array.isArray(s.expenses)) s.expenses = [];
   if (!Array.isArray(s.todos)) s.todos = [];
   if (!s.legDetails || typeof s.legDetails !== 'object') s.legDetails = {};
+  if (!s.legModes || typeof s.legModes !== 'object') s.legModes = {}; // 新行程一開始沒有，沒補的話交通視窗儲存會出錯
   s.todos = s.todos.filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || createId('todo'), text: t.text, done: Boolean(t.done) }));
   if (typeof s.tripName !== 'string') s.tripName = '';
   s.days.forEach(day => {
@@ -3444,7 +3445,11 @@ async function flushCloudSave() {
   const trip = pickTripData(state);
   const tripJson = stableStringify(trip);
   if (tripJson !== sync.lastTripJson) {
-    batch.set(sync.tripRef, { ...trip, updatedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    // mergeFields：這些欄位整個覆寫，其他欄位（createdAt、expireAt）保留。
+    // 不能用 merge: true——它會逐層合併 map，legModes／legDetails 刪掉的項目在雲端不會消失，
+    // 下次同步又被合併回來（例如「重設回 API 預設值」後又變回自訂交通）
+    const fields = { ...trip, updatedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    batch.set(sync.tripRef, fields, { mergeFields: Object.keys(fields) });
     sync.lastTripJson = tripJson;
     sync.baseTrip = JSON.parse(JSON.stringify(trip));
     writes++;
