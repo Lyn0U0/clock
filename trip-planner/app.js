@@ -34,6 +34,8 @@ const FIREBASE_CONFIG = {
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/10.12.2';
 
 const KEY_STORAGE = 'trip-planner-gmaps-key';
+const IMGUR_KEY_STORAGE = 'trip-planner-imgur-client-id';     // 詳細紀錄插入圖片用（選填，只存在這台瀏覽器）
+const IMGUR_UPLOADS_STORAGE = 'trip-planner-imgur-uploads';   // 這台瀏覽器上傳過的圖片：網址 → deletehash（刪圖用）
 const STATE_STORAGE = 'trip-planner-state-v2';
 const LEGACY_SPOTS_STORAGE = 'trip-planner-spots'; // 舊版（固定 5 天）的資料
 const DEFAULT_CENTER = { lat: 25.0375, lng: 121.5637 };
@@ -1881,6 +1883,9 @@ function showSetup(error, { cancelable = false } = {}) {
   input.value = getApiKey();
   document.getElementById('setup-clear').hidden = !getStoredApiKey();
   document.getElementById('setup-cancel').hidden = !cancelable;
+  document.getElementById('imgur-key').value = getImgurClientId();
+  document.getElementById('imgur-clear').hidden = !getImgurClientId();
+  document.getElementById('imgur-status').hidden = true;
   input.focus();
   input.select();
 }
@@ -1918,6 +1923,34 @@ document.getElementById('setup-form').addEventListener('submit', e => {
     return;
   }
   location.reload(); // Google Maps 載入後無法更換金鑰，需重新載入頁面
+});
+
+// Imgur Client ID：存在這台瀏覽器，不用重新載入
+document.getElementById('imgur-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const id = document.getElementById('imgur-key').value.trim();
+  const status = document.getElementById('imgur-status');
+  if (!id) return;
+  try {
+    localStorage.setItem(IMGUR_KEY_STORAGE, id);
+  } catch {
+    status.textContent = '這個瀏覽器無法儲存（可能是無痕模式）';
+    status.hidden = false;
+    return;
+  }
+  status.textContent = '已儲存，詳細紀錄可以插入圖片了';
+  status.hidden = false;
+  document.getElementById('imgur-clear').hidden = false;
+});
+
+document.getElementById('imgur-clear').addEventListener('click', () => {
+  if (!confirm('清除這台瀏覽器的 Imgur Client ID？已插入的圖片不受影響。')) return;
+  try { localStorage.removeItem(IMGUR_KEY_STORAGE); } catch {}
+  document.getElementById('imgur-key').value = '';
+  document.getElementById('imgur-clear').hidden = true;
+  const status = document.getElementById('imgur-status');
+  status.textContent = '已清除';
+  status.hidden = false;
 });
 
 // 金鑰無效或網站未授權時，Google 會呼叫這個函式；保留金鑰讓使用者直接修正
@@ -2542,10 +2575,28 @@ const noteModal = {
 };
 
 // 詳細紀錄的簡易 Markdown：先跳脫 HTML，再處理清單、粗體與網址，不會執行任何使用者輸入的 HTML
+const IMAGE_URL_RE = /\.(jpe?g|png|gif|webp)(\?[^\s]*)?$/i;
+
+function renderNoteImage(url, alt = '') {
+  return `<a class="note-img" href="${url}" target="_blank" rel="noopener"><img src="${url}" alt="${alt || '圖片'}" loading="lazy" referrerpolicy="no-referrer"></a>`;
+}
+
+// 詳細紀錄裡的圖片網址：![說明](網址) 或直接貼的圖片網址（.jpg／.png／.gif／.webp）
+function getNoteImageUrls(text) {
+  return [...(text || '').matchAll(/https?:\/\/[^\s)<]+/g)].map(m => m[0]).filter(url => IMAGE_URL_RE.test(url));
+}
+
 function renderNoteText(text) {
-  const inline = line => escapeHtml(line)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  const inline = line => {
+    const tokens = [];
+    const keep = html => `\u0000${tokens.push(html) - 1}\u0000`;
+    return escapeHtml(line)
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g, (_, alt, url) => keep(renderNoteImage(url, alt)))
+      .replace(/https?:\/\/[^\s<\u0000]+/g, url => keep(IMAGE_URL_RE.test(url) ? renderNoteImage(url)
+        : `<a href="${url}" target="_blank" rel="noopener">${url}</a>`))
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\u0000(\d+)\u0000/g, (_, i) => tokens[i]);
+  };
   const blocks = [];
   let list = null;
   text.trim().split('\n').forEach(raw => {
@@ -2586,6 +2637,7 @@ function openNoteModal(spotId, focus) {
   const detail = document.getElementById('note-detail');
   short.value = spot.note;
   detail.value = spot.detailedNotes;
+  startNoteImages(spot.detailedNotes);
   updateNoteCounter();
   setNotePreview(false);
   ui.spotMenuId = null;
@@ -2606,6 +2658,7 @@ function openNoteModal(spotId, focus) {
 
 function closeNoteModal() {
   if (noteModal.el.hidden) return;
+  if (!noteModal.imagesSettled) settleNoteImages(noteModal.originalDetail); // 取消：這次上傳但沒存的圖片刪掉
   noteModal.el.hidden = true;
   noteModal.backdrop.hidden = true;
   noteModal.spotId = null;
@@ -2635,6 +2688,7 @@ function openDayNoteModal(dayId) {
   short.placeholder = '例如：早上 8 點集合、今天要早睡';
   short.value = day.note;
   document.getElementById('note-detail').value = day.detailedNotes;
+  startNoteImages(day.detailedNotes);
   updateNoteCounter();
   setNotePreview(false);
   noteModal.el.hidden = false;
@@ -2643,6 +2697,7 @@ function openDayNoteModal(dayId) {
 }
 
 function submitNoteModal() {
+  settleNoteImages(document.getElementById('note-detail').value);
   if (noteModal.dayId) {
     const day = getDay(noteModal.dayId);
     const dayId = noteModal.dayId;
@@ -2680,6 +2735,152 @@ function updateNoteCounter() {
   const short = document.getElementById('note-short');
   document.getElementById('note-count').textContent = `${[...short.value].length}/${short.maxLength}`;
 }
+
+/* ---------- 詳細紀錄插入圖片（Imgur） ----------
+ * 圖片傳到 Imgur，備註裡只存網址（資料庫幾乎沒負擔）。上傳前先壓縮到長邊 1600px。
+ * Imgur 回傳的 deletehash 存在這台瀏覽器：備註裡刪掉圖片、或上傳後沒儲存，就順便把 Imgur 上的圖刪掉。
+ * 注意：Imgur 的圖片拿到網址的人都看得到，雲端行程 30 天到期時也不會自動刪除。 */
+function getImgurClientId() {
+  try { return localStorage.getItem(IMGUR_KEY_STORAGE) || ''; } catch { return ''; }
+}
+
+function readImgurUploads() {
+  try { return JSON.parse(localStorage.getItem(IMGUR_UPLOADS_STORAGE)) || {}; } catch { return {}; }
+}
+
+function writeImgurUploads(map) {
+  try { localStorage.setItem(IMGUR_UPLOADS_STORAGE, JSON.stringify(map)); } catch {}
+}
+
+function startNoteImages(text) {
+  noteModal.originalDetail = text || '';
+  noteModal.uploaded = [];
+  noteModal.imagesSettled = false;
+  setNoteImageStatus('');
+}
+
+// 視窗關閉時：原本有的、這次上傳的圖片，最後不在備註裡的就從 Imgur 刪掉（只刪這台瀏覽器上傳的）
+function settleNoteImages(finalText) {
+  noteModal.imagesSettled = true;
+  const keep = new Set(getNoteImageUrls(finalText));
+  const uploads = readImgurUploads();
+  const gone = [...new Set([...getNoteImageUrls(noteModal.originalDetail), ...(noteModal.uploaded || [])])]
+    .filter(url => !keep.has(url) && uploads[url]);
+  gone.forEach(deleteImgurImage);
+}
+
+function deleteImgurImage(url) {
+  const uploads = readImgurUploads();
+  const hash = uploads[url];
+  const clientId = getImgurClientId();
+  if (!hash) return;
+  delete uploads[url];
+  writeImgurUploads(uploads);
+  if (!clientId) return;
+  fetch(`https://api.imgur.com/3/image/${encodeURIComponent(hash)}`, { method: 'DELETE', headers: { Authorization: `Client-ID ${clientId}` } })
+    .catch(err => console.warn('Imgur delete:', err));
+}
+
+function setNoteImageStatus(text, isError = false) {
+  const el = document.getElementById('note-img-status');
+  el.hidden = !text;
+  el.textContent = text;
+  el.classList.toggle('error', isError);
+}
+
+// 長邊縮到 1600px、轉成 JPEG；GIF 保留動畫不壓縮
+async function compressImage(file) {
+  if (file.type === 'image/gif') return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('無法讀取這張圖片'));
+      el.src = url;
+    });
+    const scale = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * scale);
+    canvas.height = Math.round(img.naturalHeight * scale);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF'; // 透明 PNG 轉 JPEG 時底色用白色
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    return blob && blob.size < file.size ? blob : file;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function uploadToImgur(blob, clientId) {
+  const body = new FormData();
+  body.append('image', blob);
+  body.append('type', 'file');
+  let res;
+  try {
+    res = await fetch('https://api.imgur.com/3/image', { method: 'POST', headers: { Authorization: `Client-ID ${clientId}` }, body });
+  } catch {
+    throw new Error('連不上 Imgur，請檢查網路連線');
+  }
+  const json = await res.json().catch(() => null);
+  if (res.ok && json?.data?.link) return { link: json.data.link, deletehash: json.data.deletehash };
+  if (res.status === 429) throw new Error('Imgur 上傳額度暫時用完了，請稍後再試');
+  if (res.status === 401 || res.status === 403) throw new Error('Imgur Client ID 無效，請到「⚙ → 金鑰設定」檢查');
+  const msg = json?.data?.error?.message || json?.data?.error;
+  throw new Error(`Imgur 上傳失敗${typeof msg === 'string' ? `：${msg}` : `（${res.status}）`}`);
+}
+
+// 在游標位置插入一行文字（前後各自換行）
+function insertNoteLine(textarea, line) {
+  const { value, selectionStart: start, selectionEnd: end } = textarea;
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  const text = `${before && !before.endsWith('\n') ? '\n' : ''}${line}${after.startsWith('\n') || !after ? '' : '\n'}`;
+  textarea.setRangeText(text, start, end, 'end');
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+async function insertNoteImages(files) {
+  const clientId = getImgurClientId();
+  if (!clientId) {
+    setNoteImageStatus('還沒設定 Imgur Client ID：請先到「⚙ → 金鑰設定」填寫（關閉這個視窗前記得先儲存備註）', true);
+    return;
+  }
+  const detail = document.getElementById('note-detail');
+  setNotePreview(false);
+  const btn = document.getElementById('note-img-btn');
+  btn.disabled = true;
+  let done = 0;
+  try {
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      setNoteImageStatus(`上傳中…（${done + 1}/${files.length}）`);
+      const { link, deletehash } = await uploadToImgur(await compressImage(file), clientId);
+      if (deletehash) writeImgurUploads({ ...readImgurUploads(), [link]: deletehash });
+      if (noteModal.el.hidden || noteModal.imagesSettled) { // 上傳途中視窗已經關掉：這張用不到了
+        deleteImgurImage(link);
+        continue;
+      }
+      noteModal.uploaded.push(link);
+      insertNoteLine(detail, `![](${link})`);
+      done++;
+    }
+    setNoteImageStatus(done ? `已插入 ${done} 張圖片，按「儲存」保存。圖片在 Imgur 上拿到網址的人都看得到。` : '');
+  } catch (err) {
+    setNoteImageStatus(err.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('note-img-btn').addEventListener('click', () => document.getElementById('note-img-file').click());
+document.getElementById('note-img-file').addEventListener('change', e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (files.length) insertNoteImages(files);
+});
 
 function setNotePreview(on) {
   const detail = document.getElementById('note-detail');
@@ -4016,6 +4217,8 @@ const HANDBOOK_CSS = `
 .hb-icon { flex-shrink:0; display:grid; place-items:center; width:30px; height:30px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--ink); font-size:14px; font-weight:900; }
 .hb-spot-body { flex:1; min-width:0; }
 .hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; font-weight:700; }
+.hb-detail img { display:block; max-width:100%; max-height:320px; margin:6px 0; border:1.5px solid var(--ink); border-radius:8px; }
+.hb-detail .note-img { display:inline-block; }
 .hb-detail { margin:6px 0 0; padding:8px 10px; border:1.5px dashed var(--edge); border-radius:8px; font-size:12.5px; }
 .hb-day-note { margin:0 0 10px 22px; }
 .hb-time { display:inline-block; margin-right:8px; padding:0 8px; border:1.5px solid var(--ink); border-radius:999px; font-size:12px; font-variant-numeric:tabular-nums; }

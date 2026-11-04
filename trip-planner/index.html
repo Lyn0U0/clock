@@ -85,7 +85,7 @@
           </button>
           <button role="menuitem" data-action="open-key-settings">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M14 9l2 2"/></svg>
-            Google Maps 金鑰
+            金鑰設定
           </button>
           <a role="menuitem" href="https://github.com/Lyn0U0/clock/blob/claude/amazing-hopper-a3rihm/trip-planner/README.md" target="_blank" rel="noopener">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>
@@ -173,7 +173,8 @@
       </form>
       <div class="setup" id="setup" role="dialog" aria-labelledby="setup-title" hidden>
         <div class="setup-card">
-          <h2 id="setup-title">設定 Google Maps 金鑰</h2>
+          <h2 id="setup-title">金鑰設定</h2>
+          <h3 class="setup-sub">Google Maps 金鑰</h3>
           <p class="setup-error" id="setup-error" hidden></p>
           <ol>
             <li>到 <a href="https://console.cloud.google.com/google/maps-apis/credentials" target="_blank" rel="noopener">Google Cloud Console</a> 建立 API 金鑰。</li>
@@ -187,7 +188,22 @@
           </form>
           <div class="setup-actions">
             <button type="button" class="btn-text danger" id="setup-clear" hidden>清除這台瀏覽器的金鑰</button>
-            <button type="button" class="btn-text" id="setup-cancel" hidden>取消，回到地圖</button>
+          </div>
+          <hr class="setup-sep">
+          <h3 class="setup-sub">Imgur Client ID <small>選填・詳細紀錄插入圖片用</small></h3>
+          <ol>
+            <li>到 <a href="https://api.imgur.com/oauth2/addclient" target="_blank" rel="noopener">Imgur 註冊應用程式</a>，授權類型選「OAuth 2 authorization without a callback URL」。</li>
+            <li>把拿到的 <strong>Client ID</strong>（不是 Client Secret）貼在下面。</li>
+          </ol>
+          <p>Client ID 只會存在這台瀏覽器。圖片會公開在 Imgur（拿到網址的人都看得到），請勿上傳票券、證件或訂房確認信。</p>
+          <form class="setup-form" id="imgur-form">
+            <input id="imgur-key" type="text" placeholder="貼上 Imgur Client ID" autocomplete="off" spellcheck="false">
+            <button type="submit" class="btn-primary">儲存</button>
+          </form>
+          <p class="setup-saved" id="imgur-status" role="status" hidden></p>
+          <div class="setup-actions">
+            <button type="button" class="btn-text danger" id="imgur-clear" hidden>清除 Imgur Client ID</button>
+            <button type="button" class="btn-text" id="setup-cancel" hidden>關閉，回到地圖</button>
           </div>
         </div>
       </div>
@@ -261,12 +277,15 @@
       <span class="note-label">
         <label for="note-detail">詳細紀錄</label>
         <small>營業時間、必吃必買、預約編號、連結…</small>
+        <button type="button" class="link-btn note-img-btn" id="note-img-btn" title="上傳圖片到 Imgur，備註裡只存網址">📷 插入圖片</button>
         <button type="button" class="link-btn note-preview-toggle" id="note-preview-toggle" aria-pressed="false">預覽</button>
       </span>
       <textarea class="field note-detail" id="note-detail" rows="8" maxlength="4000"
         placeholder="- 營業時間 10:00–21:00（週一公休）&#10;- **必吃**：芒果冰、杏仁豆腐&#10;- 預約編號 A12345&#10;https://example.com/ticket"></textarea>
       <div class="note-preview" id="note-preview" hidden></div>
-      <p class="note-hint">支援「- 」開頭的清單、**粗體**，網址會自動變成連結。</p>
+      <input type="file" id="note-img-file" accept="image/*" multiple hidden>
+      <p class="note-hint note-img-status" id="note-img-status" role="status" hidden></p>
+      <p class="note-hint">支援「- 」開頭的清單、**粗體**，網址會自動變成連結；圖片網址會顯示成圖片（按「預覽」查看）。</p>
     </div>
     <footer class="note-foot">
       <span class="note-shortcut"><kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd> 儲存</span>

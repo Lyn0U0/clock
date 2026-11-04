@@ -1925,3 +1925,24 @@ button.spot-index:hover { transform: scale(1.12); }
 .leg-unconfirmed-check { margin: 0 0 4px; }
 .leg-unconfirmed-check small { color: var(--muted); font-weight: 500; }
 .leg-reset-status { margin: 0; align-self: center; font-weight: 700; color: var(--ink); }
+
+/* 金鑰設定：Google Maps＋Imgur（內容變長，可捲動） */
+.setup { overflow-y: auto; }
+.setup-card .setup-sub { margin: 4px 0 0; font-size: 15px; font-weight: 900; }
+.setup-card .setup-sub small { margin-left: 6px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.setup-sep { width: 100%; margin: 4px 0; border: 0; border-top: 2px dashed var(--edge, #D6D3D1); }
+.setup-card .setup-saved { color: var(--ink); font-weight: 700; }
+
+/* 詳細紀錄的圖片 */
+.note-img-btn { margin-left: auto; white-space: nowrap; }
+.note-img-btn + .note-preview-toggle { margin-left: 8px; }
+.note-img-btn:disabled { opacity: .5; cursor: progress; }
+.note-img-status { margin: 0; font-weight: 700; color: var(--ink); }
+.note-img-status.error { color: var(--danger); }
+.note-preview .note-img { display: inline-block; margin: 4px 6px 4px 0; vertical-align: top; }
+.note-preview .note-img img {
+  display: block; max-width: 100%; max-height: 260px; border: 2px solid var(--ink); border-radius: var(--r-sm);
+  background: var(--surface);
+}
+.note-label:has(#note-img-btn) label, .note-preview-toggle { white-space: nowrap; }
+@media (max-width: 760px) { .note-label:has(#note-img-btn) small { display: none; } }
