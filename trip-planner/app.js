@@ -129,7 +129,7 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *
  * 所有資料只存在 state 裡，清單、分頁、地圖圖釘都由它產生：
  *   state = {
- *     days: [{ id, spots: [Spot] }],  // 陣列順序就是 Day 1、Day 2…
+ *     days: [{ id, spots: [Spot], note, detailedNotes }],  // 陣列順序就是 Day 1、Day 2…；note／detailedNotes 是當天的備註
  *     tripName: '',                       // 旅程名稱，空白時顯示「旅遊行程規劃」
  *     startDate: 'YYYY-MM-DD' | '',       // 出發日期；設定後每天會標上日期
  *     activeDayId: dayId | OVERVIEW,
@@ -186,7 +186,7 @@ function createId(prefix) {
 }
 
 function createDay() {
-  return { id: createId('day'), spots: [] };
+  return { id: createId('day'), spots: [], note: '', detailedNotes: '' };
 }
 
 function createSpot({ name, lat, lng, placeId }) {
@@ -243,6 +243,10 @@ function normalizeState(s) {
   if (!s.legDetails || typeof s.legDetails !== 'object') s.legDetails = {};
   s.todos = s.todos.filter(t => t && typeof t.text === 'string').map(t => ({ id: t.id || createId('todo'), text: t.text, done: Boolean(t.done) }));
   if (typeof s.tripName !== 'string') s.tripName = '';
+  s.days.forEach(day => {
+    if (typeof day.note !== 'string') day.note = '';
+    if (typeof day.detailedNotes !== 'string') day.detailedNotes = '';
+  });
   s.days.forEach(day => day.spots.forEach(spot => {
     if (!SPOT_ICONS.some(i => i.value === spot.icon)) spot.icon = '';
     normalizeSpotNotes(spot);
@@ -1020,6 +1024,7 @@ const ICONS = {
   chevronRight: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   down: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12l7 7 7-7"/></svg>',
   note: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4zM13.5 6.5l4 4"/></svg>',
+  copy: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>',
   memo: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5M8.5 9h7M8.5 12.5h4"/></svg>',
   trash: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></svg>',
   grip: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="6" r="1.5"/><circle cx="15" cy="6" r="1.5"/><circle cx="9" cy="12" r="1.5"/><circle cx="15" cy="12" r="1.5"/><circle cx="9" cy="18" r="1.5"/><circle cx="15" cy="18" r="1.5"/></svg>',
@@ -1159,6 +1164,7 @@ function renderDayList() {
           </span>
           <button class="icon-btn danger day-remove" data-action="remove-day" data-day-id="${day.id}"
             ${canRemoveDay ? `title="刪除 ${label}" aria-label="刪除 ${label}"` : 'disabled title="至少要保留一天" aria-label="至少要保留一天"'}>${ICONS.trash}</button>
+          <div class="day-note">${renderNoteChip(day, label, '當天備註')}</div>
         </header>
         ${day.spots.length
           ? `<ol class="spot-list" data-day-id="${day.id}">${renderDaySpots(day)}</ol>`
@@ -1176,14 +1182,14 @@ function renderDaySpots(day) {
   }).join('');
 }
 
-// 卡片上的備註標籤：有備註顯示單行摘要（只有詳細紀錄時顯示其第一行），沒有則是低調的「+ 備註」
-function renderNoteChip(spot) {
-  const summary = spot.note.trim() || spot.detailedNotes.trim().split('\n')[0];
-  const hasDetail = Boolean(spot.detailedNotes.trim());
+// 備註標籤（景點卡與 Day 標題共用）：有備註顯示單行摘要（只有詳細紀錄時顯示其第一行），沒有則是低調的「+ 備註」
+function renderNoteChip(target, name = target.name, emptyLabel = '備註') {
+  const summary = target.note.trim() || target.detailedNotes.trim().split('\n')[0];
+  const hasDetail = Boolean(target.detailedNotes.trim());
   if (!summary) {
-    return `<button class="note-chip empty" data-action="open-note" aria-label="為 ${escapeHtml(spot.name)} 新增備註">${ICONS.memo}備註</button>`;
+    return `<button class="note-chip empty" data-action="open-note" aria-label="為 ${escapeHtml(name)} 新增備註">${ICONS.memo}${emptyLabel}</button>`;
   }
-  return `<button class="note-chip" data-action="open-note" title="${escapeHtml(summary)}" aria-label="編輯 ${escapeHtml(spot.name)} 的備註：${escapeHtml(summary)}">
+  return `<button class="note-chip" data-action="open-note" title="${escapeHtml(summary)}" aria-label="編輯 ${escapeHtml(name)} 的備註：${escapeHtml(summary)}">
       ${ICONS.memo}<span class="note-chip-text">${escapeHtml(summary)}</span>${hasDetail ? '<span class="note-chip-more" aria-hidden="true">詳細</span>' : ''}
     </button>`;
 }
@@ -1228,6 +1234,7 @@ function renderSpotCard(spot, index, total) {
         ${menuOpen ? `
           <div class="menu spot-menu" role="menu">
             <button role="menuitem" data-action="open-note">${ICONS.note}${hasNote ? '編輯備註' : '新增備註'}</button>
+            <button role="menuitem" data-action="copy-spot">${ICONS.copy}複製到其他天…</button>
             <button role="menuitem" data-action="move-up" ${index === 0 ? 'disabled' : ''}>${ICONS.up}往前移</button>
             <button role="menuitem" data-action="move-down" ${index === total - 1 ? 'disabled' : ''}>${ICONS.down}往後移</button>
             <button role="menuitem" class="danger" data-action="remove-spot">${ICONS.trash}刪除景點</button>
@@ -1587,7 +1594,13 @@ function handleAction(btn, spotId) {
     case 'remove-day': removeDay(btn.dataset.dayId); break;
     case 'move-up': moveSpotBy(spotId, -1); break;
     case 'move-down': moveSpotBy(spotId, 1); break;
-    case 'open-note': openNoteModal(spotId); break;
+    case 'open-note': {
+      const dayEl = btn.closest('.day-note') && btn.closest('.day');
+      if (dayEl) openDayNoteModal(dayEl.dataset.dayId);
+      else openNoteModal(spotId);
+      break;
+    }
+    case 'copy-spot': openCopyModal(spotId); break;
     case 'edit-leg': {
       const leg = btn.closest('.leg');
       openLegModal(leg.dataset.from, leg.dataset.to);
@@ -2493,6 +2506,7 @@ const noteModal = {
   el: document.getElementById('note-modal'),
   backdrop: document.getElementById('note-backdrop'),
   spotId: null,
+  dayId: null,
   returnFocus: null
 };
 
@@ -2522,6 +2536,10 @@ function openNoteModal(spotId) {
   if (!found) return;
   const { spot, dayIndex, index } = found;
   noteModal.spotId = spotId;
+  noteModal.dayId = null;
+  document.getElementById('note-map-link').hidden = false;
+  document.getElementById('note-sep').hidden = false;
+  document.getElementById('note-short').placeholder = '例如：需先出示 QR Code、推薦布丁';
   noteModal.returnFocus = document.activeElement;
   const date = getDayDateText(dayIndex);
   document.getElementById('note-title').textContent = spot.name;
@@ -2555,7 +2573,48 @@ function closeNoteModal() {
   (back || document.querySelector('.note-chip'))?.focus?.();
 }
 
+// Day 標題的備註：沿用同一個視窗，存到 day.note／day.detailedNotes
+function openDayNoteModal(dayId) {
+  const day = getDay(dayId);
+  if (!day) return;
+  const dayIndex = getDayIndex(dayId);
+  noteModal.spotId = null;
+  noteModal.dayId = dayId;
+  noteModal.returnFocus = document.activeElement;
+  const date = getDayDateText(dayIndex);
+  document.getElementById('note-title').textContent = `${getDayLabel(dayIndex)}${date ? ` ${date}` : ''}`;
+  document.getElementById('note-where').textContent = `${day.spots.length} 個景點${renderDayTravel(day) ? `・${renderDayTravel(day)}` : ''}`;
+  document.getElementById('note-map-link').hidden = true;
+  document.getElementById('note-sep').hidden = true;
+  const icon = document.getElementById('note-icon');
+  icon.textContent = dayIndex + 1;
+  icon.style.setProperty('--c', getDayColor(dayIndex));
+  const short = document.getElementById('note-short');
+  short.placeholder = '例如：早上 8 點集合、今天要早睡';
+  short.value = day.note;
+  document.getElementById('note-detail').value = day.detailedNotes;
+  updateNoteCounter();
+  setNotePreview(false);
+  noteModal.el.hidden = false;
+  noteModal.backdrop.hidden = false;
+  short.focus();
+}
+
 function submitNoteModal() {
+  if (noteModal.dayId) {
+    const day = getDay(noteModal.dayId);
+    const dayId = noteModal.dayId;
+    if (day) {
+      day.note = document.getElementById('note-short').value.trim();
+      day.detailedNotes = document.getElementById('note-detail').value.replace(/\s+$/, '');
+      commit();
+    }
+    noteModal.returnFocus = null;
+    noteModal.dayId = null;
+    closeNoteModal();
+    document.querySelector(`.day[data-day-id="${dayId}"] .day-note .note-chip`)?.focus();
+    return;
+  }
   const spotId = noteModal.spotId;
   if (!spotId) return;
   const ok = saveSpotNotes(spotId, document.getElementById('note-short').value, document.getElementById('note-detail').value);
@@ -2599,6 +2658,102 @@ noteModal.el.addEventListener('keydown', e => {
   } else if (e.key === 'Enter' && e.target.id === 'note-short') {
     e.preventDefault(); // 單行備註按 Enter 跳到詳細紀錄，避免誤送出
     document.getElementById('note-detail').focus();
+  }
+});
+
+
+/* ==========================================================================
+ * 8g. 複製景點到其他天（例如每天都從同一間飯店出發、回到飯店）
+ *
+ * 複製出來的是獨立景點（新的 id）：名稱、座標、Place ID、類別、備註沿用，記帳各天分開。
+ * 位置可選當天第一站、最後一站或頭尾都加；那個位置已經是同一地點時不重複加入。
+ * ========================================================================== */
+
+const copyModal = { el: document.getElementById('copy-modal'), spotId: null, returnFocus: null };
+
+function isSamePlace(a, b) {
+  if (a.placeId && b.placeId) return a.placeId === b.placeId;
+  return Math.abs(a.lat - b.lat) < 1e-5 && Math.abs(a.lng - b.lng) < 1e-5;
+}
+
+function copySpotToDays(spotId, dayIds, position) {
+  const found = findSpot(spotId);
+  if (!found) return 0;
+  const src = found.spot;
+  const make = () => ({ ...createSpot(src), icon: src.icon, note: src.note, detailedNotes: src.detailedNotes });
+  let added = 0;
+  dayIds.forEach(dayId => {
+    const day = getDay(dayId);
+    if (!day) return;
+    if ((position === 'start' || position === 'both') && !(day.spots[0] && isSamePlace(day.spots[0], src))) {
+      day.spots.unshift(make());
+      added++;
+    }
+    const last = day.spots[day.spots.length - 1];
+    if ((position === 'end' || position === 'both') && !(last && isSamePlace(last, src) && (position === 'end' || day.spots.length > 1))) {
+      day.spots.push(make());
+      added++;
+    }
+  });
+  if (added) commit();
+  return added;
+}
+
+function openCopyModal(spotId) {
+  const found = findSpot(spotId);
+  if (!found) return;
+  copyModal.spotId = spotId;
+  copyModal.returnFocus = document.activeElement;
+  const form = copyModal.el;
+  document.getElementById('copy-title').textContent = `複製「${found.spot.name}」到其他天`;
+  form.querySelector('.copy-days').innerHTML = state.days.map((d, i) => `
+      <label class="copy-day" style="--c:${getDayColor(i)}">
+        <input type="checkbox" name="day" value="${d.id}" ${d.id === found.day.id ? '' : 'checked'}>
+        <span class="tab-dot"></span><span>${getDayLabel(i)}${getDayDateText(i) ? ` <small>${getDayDateText(i)}</small>` : ''}</span>
+        ${d.id === found.day.id ? '<small class="copy-here">（目前這天）</small>' : ''}
+      </label>`).join('');
+  // 住宿預設頭尾都加：早上從飯店出發、晚上回到飯店
+  form.elements.position.value = found.spot.icon === '🏠' ? 'both' : 'end';
+  document.getElementById('copy-status').textContent = '';
+  form.hidden = false;
+  document.getElementById('copy-backdrop').hidden = false;
+  form.querySelector('input[name="day"]:checked, input[name="day"]')?.focus();
+}
+
+function closeCopyModal() {
+  if (copyModal.el.hidden) return;
+  copyModal.el.hidden = true;
+  document.getElementById('copy-backdrop').hidden = true;
+  if (copyModal.returnFocus?.isConnected) copyModal.returnFocus.focus();
+}
+
+copyModal.el.addEventListener('submit', e => {
+  e.preventDefault();
+  const form = copyModal.el;
+  const dayIds = [...form.querySelectorAll('input[name="day"]:checked')].map(i => i.value);
+  if (!dayIds.length) {
+    document.getElementById('copy-status').textContent = '請至少選一天';
+    return;
+  }
+  const added = copySpotToDays(copyModal.spotId, dayIds, form.elements.position.value);
+  copyModal.returnFocus = null;
+  closeCopyModal();
+  if (!added) alert('選的那幾天在這個位置已經有這個地點了，沒有重複加入。');
+});
+copyModal.el.addEventListener('click', e => {
+  if (e.target.closest('[data-action="close-copy"]')) closeCopyModal();
+  const all = e.target.closest('[data-action="copy-all"]');
+  if (all) {
+    const boxes = [...copyModal.el.querySelectorAll('input[name="day"]')];
+    const on = boxes.some(b => !b.checked);
+    boxes.forEach(b => { b.checked = on; });
+  }
+});
+document.getElementById('copy-backdrop').addEventListener('click', closeCopyModal);
+copyModal.el.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    e.stopPropagation();
+    closeCopyModal();
   }
 });
 
@@ -3326,8 +3481,13 @@ function mergeTrip(base, local, remote) {
   const R = flatten(remote);
   const spots = mergeMap(B.spots, L.spots, R.spots);
   const placed = new Set();
+  // 每天的備註各自比較
+  const metaOf = trip => Object.fromEntries(trip.days.map(d => [d.id, { note: d.note || '', detailedNotes: d.detailedNotes || '' }]));
+  const dayMeta = mergeMap(metaOf(base), metaOf(local), metaOf(remote));
   const days = mergeIds(B.order, L.order, R.order).map(id => ({
     id,
+    note: dayMeta[id]?.note || '',
+    detailedNotes: dayMeta[id]?.detailedNotes || '',
     spots: mergeIds(B.lists[id] || [], L.lists[id] || [], R.lists[id] || [])
       .filter(spotId => spots[spotId] && !placed.has(spotId) && placed.add(spotId))
       .map(spotId => spots[spotId])
@@ -3699,6 +3859,8 @@ function buildHandbook({ print = false } = {}) {
     return `<section class="hb-day" id="day-${i + 1}" style="--c:${getDayColor(i)}">
         <h2><span class="hb-dot"></span>${getDayLabel(i)}${date ? `<small>${date}</small>` : ''}</h2>
         <p class="hb-day-sum">${day.spots.length} 個景點${travel ? `・${travel}` : ''}</p>
+        ${day.note.trim() ? `<p class="hb-note hb-day-note">${escapeHtml(day.note.trim())}</p>` : ''}
+        ${day.detailedNotes.trim() ? `<div class="hb-detail hb-day-note">${renderNoteText(day.detailedNotes)}</div>` : ''}
         ${day.spots.length ? `<ol class="hb-timeline">${items}</ol>` : '<p class="hb-empty">這天沒有安排景點</p>'}
       </section>`;
   }).join('');
@@ -3757,6 +3919,7 @@ const HANDBOOK_CSS = `
 .hb-spot-body { flex:1; min-width:0; }
 .hb-note { margin:4px 0 0; padding:6px 10px; border-radius:8px; background:var(--yellow-soft); font-size:13px; font-weight:700; }
 .hb-detail { margin:6px 0 0; padding:8px 10px; border:1.5px dashed var(--edge); border-radius:8px; font-size:12.5px; }
+.hb-day-note { margin:0 0 10px 22px; }
 .hb-detail p { margin:0 0 4px; } .hb-detail ul { margin:0 0 4px; padding-left:18px; } .hb-detail a { color:#2563EB; word-break:break-all; }
 .hb-leg { margin-left:26px; padding:8px 0 8px 18px; border-left:2px dashed #A8A090; font-size:13px; break-inside:avoid; }
 .hb-leg-mode { font-weight:700; margin-right:8px; }

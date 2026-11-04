@@ -1847,3 +1847,30 @@ button.spot-index:hover { transform: scale(1.12); }
 .leg-tags { align-items: center; }
 .leg-tags-badge { display: contents; }
 @media (max-width: 760px) { .leg-tags-badge { display: none; } } /* 手機的記帳標籤在交通標籤列 */
+
+/* Day 標題的備註列 */
+.day-note { order: 2; flex-basis: 100%; padding-left: 20px; display: flex; }
+.day-head .note-chip.empty { opacity: .6; }
+.day:hover .day-head .note-chip.empty, .day-head .note-chip.empty:focus-visible { opacity: 1; }
+
+/* 複製景點到其他天 */
+.copy-days { display: flex; flex-direction: column; gap: 6px; }
+.copy-day {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.copy-day input { width: 18px; height: 18px; accent-color: var(--ink); }
+.copy-day:has(input:checked) { background: var(--primary-soft); }
+.copy-day small { font-weight: 500; color: var(--muted); }
+.copy-here { margin-left: auto; }
+.copy-status { color: var(--danger); font-weight: 700; }
+.copy-status:empty { display: none; }

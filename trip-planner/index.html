@@ -237,7 +237,7 @@
       <span class="spot-index note-icon" id="note-icon" aria-hidden="true"></span>
       <div class="note-titles">
         <h2 id="note-title"></h2>
-        <p><span id="note-where"></span>・<a id="note-map-link" target="_blank" rel="noopener">在 Google 地圖查看</a></p>
+        <p><span id="note-where"></span><span id="note-sep">・</span><a id="note-map-link" target="_blank" rel="noopener">在 Google 地圖查看</a></p>
       </div>
       <button type="button" class="icon-btn" data-action="close-note" aria-label="關閉" title="關閉（Esc）">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -319,6 +319,36 @@
       <span class="note-foot-gap"></span>
       <button type="button" class="btn-text" data-action="close-leg">取消</button>
       <button type="submit" class="btn-primary">儲存</button>
+    </footer>
+  </form>
+  <div class="drawer-backdrop" id="copy-backdrop" hidden></div>
+  <form class="note-modal copy-modal" id="copy-modal" role="dialog" aria-modal="true" aria-labelledby="copy-title" hidden>
+    <header class="note-head">
+      <div class="note-titles">
+        <h2 id="copy-title"></h2>
+        <p>適合每天都住同一間飯店：一次加到好幾天</p>
+      </div>
+      <button type="button" class="icon-btn" data-action="close-copy" aria-label="關閉" title="關閉（Esc）">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </header>
+    <fieldset class="note-field leg-fieldset">
+      <legend class="note-label">加到哪幾天 <button type="button" class="link-btn" data-action="copy-all">全選／全不選</button></legend>
+      <div class="copy-days"></div>
+    </fieldset>
+    <fieldset class="note-field leg-fieldset">
+      <legend class="note-label">放在當天的</legend>
+      <div class="pills">
+        <label class="pill"><input type="radio" name="position" value="start"><span>第一站（出發）</span></label>
+        <label class="pill"><input type="radio" name="position" value="end"><span>最後一站（回來）</span></label>
+        <label class="pill"><input type="radio" name="position" value="both"><span>頭尾都加</span></label>
+      </div>
+      <p class="note-hint">複製的景點會沿用名稱、類別與備註；記帳每天各自記錄。已經在那個位置的同一地點不會重複加入。</p>
+    </fieldset>
+    <p class="note-hint copy-status" id="copy-status" role="status"></p>
+    <footer class="note-foot">
+      <button type="button" class="btn-text" data-action="close-copy">取消</button>
+      <button type="submit" class="btn-primary">複製</button>
     </footer>
   </form>
   <input type="file" id="import-file" accept="application/json,.json" hidden>
