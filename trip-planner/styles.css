@@ -1907,3 +1907,20 @@ button.spot-index:hover { transform: scale(1.12); }
   .time-chip::after { content: ""; position: absolute; inset: -9px -4px; }
   .note-time-field .field { height: 48px; font-size: 16px; }
 }
+
+/* 待確認：景點與交通 */
+.time-chip.tentative, .leg-tag.pending {
+  border-style: dashed; background: var(--paper); color: var(--ink); font-weight: 800;
+}
+.time-chip.tentative:hover, .leg-tag.pending:hover { background: var(--primary-soft); }
+.pin.tentative { border-style: dashed; }
+.pin .pin-q {
+  position: absolute; top: -9px; right: -9px; transform: rotate(45deg);
+  width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink);
+  background: var(--paper); color: var(--ink); font: 900 10px/12px var(--font); text-align: center;
+}
+.pin { position: relative; }
+.leg-notime { color: var(--muted); font-weight: 700; }
+.note-tentative { min-height: 42px; }
+.leg-unconfirmed-check { margin: 0 0 4px; }
+.leg-unconfirmed-check small { color: var(--muted); font-weight: 500; }

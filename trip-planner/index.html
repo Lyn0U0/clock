@@ -250,6 +250,7 @@
       </label>
       <button type="button" class="link-btn" id="note-time-clear" hidden>清除時間</button>
       <label class="leg-check note-reserved"><input type="checkbox" id="note-reserved"><span>這是預約時間（需準時抵達）</span></label>
+      <label class="leg-check note-tentative"><input type="checkbox" id="note-tentative"><span>景點尚未確認（還在考慮）</span></label>
     </div>
     <label class="note-field">
       <span class="note-label">簡短備註 <small>會顯示在行程卡片上</small><span class="note-count" id="note-count"></span></span>
@@ -321,7 +322,11 @@
         <span>手動設定時間</span>
         <input class="field leg-minutes" name="customDuration" type="number" min="1" max="1440" step="1" inputmode="numeric" aria-label="分鐘">
         <span>分鐘</span></label>
+      <label class="leg-radio"><input type="radio" name="timeMode" value="none">
+        <span>不填時間 <small>不顯示、也不計入當天交通總時間</small></span></label>
     </fieldset>
+    <label class="leg-check leg-unconfirmed-check"><input type="checkbox" name="unconfirmed">
+      <span>交通尚未確認 <small>還沒訂票或還沒決定，在路線卡上標記「待確認」</small></span></label>
     <footer class="note-foot">
       <button type="button" class="btn-text" data-action="reset-leg" title="交通方式與時間改回預設，車次與費用保留">重設回 API 預設值</button>
       <span class="note-foot-gap"></span>

@@ -144,9 +144,12 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  *     spots 陣列順序就是當天的參觀順序；icon 為類別代號，空字串顯示編號
  *     note：簡短備註（單行，顯示在卡片上）；detailedNotes：詳細紀錄（多行，在備註視窗編輯）
  *     time：'HH:MM' 或空字串（幾點到）；reserved：true 表示是預約時間，需準時抵達
+ *     tentative：true 表示景點尚未確認（還在考慮），卡片與圖釘標記「待確認」
  *   LegDetail = {
  *     transitNote,        // 車次、月台、轉乘指引、預約代碼
  *     customDuration,     // 手動覆寫的交通時間（分鐘）；null 表示用 Google Maps 預估
+ *     noTime,             // true＝不填時間：不顯示時間、不計入當天交通總時間
+ *     unconfirmed,        // true＝交通尚未確認（還沒訂票／還沒決定），路線卡標記「待確認」
  *     cost, currency,     // 交通花費與幣別（預設 TWD）
  *     paidBy,             // 付款人（memberId）
  *     addToSettlement,    // 是否列入旅費結算（只有 TWD 可以）
@@ -191,7 +194,7 @@ function createDay() {
 }
 
 function createSpot({ name, lat, lng, placeId }) {
-  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, icon: '', note: '', detailedNotes: '', time: '', reserved: false };
+  return { id: createId('spot'), name, lat, lng, placeId: placeId || null, icon: '', note: '', detailedNotes: '', time: '', reserved: false, tentative: false };
 }
 
 // 個人行程與每個共享行程各自有一份本機資料（共享行程的是雲端資料的快取）
@@ -230,6 +233,7 @@ function loadSharedCache() {
 function normalizeSpotNotes(spot) {
   if (typeof spot.time !== 'string' || !/^\d{2}:\d{2}$/.test(spot.time)) spot.time = '';
   spot.reserved = Boolean(spot.reserved && spot.time);
+  spot.tentative = Boolean(spot.tentative);
   if (typeof spot.note !== 'string') spot.note = '';
   if (typeof spot.detailedNotes !== 'string') {
     const [first, ...rest] = spot.note.split('\n');
@@ -498,6 +502,7 @@ function getLegDetail(fromSpot, toSpot) {
 // 路段實際採用的秒數：手動覆寫優先，否則用 Routes API 的預估；都沒有時為 null
 function getLegDurationSec(fromSpot, toSpot) {
   const detail = getLegDetail(fromSpot, toSpot);
+  if (detail?.noTime) return null;
   if (detail?.customDuration > 0) return detail.customDuration * 60;
   const leg = legCache.get(getLegKey(fromSpot, toSpot, getLegMode(fromSpot, toSpot).value));
   return leg?.status === 'ok' ? leg.durationSec : null;
@@ -525,7 +530,9 @@ function saveLegDetail(fromId, toId, input) {
   const prev = state.legDetails[key] || {};
   const detail = {
     transitNote: input.transitNote.trim(),
-    customDuration: input.customDuration > 0 ? Math.round(input.customDuration) : null,
+    customDuration: !input.noTime && input.customDuration > 0 ? Math.round(input.customDuration) : null,
+    noTime: Boolean(input.noTime),
+    unconfirmed: Boolean(input.unconfirmed),
     cost: input.cost > 0 ? input.cost : null,
     currency: input.currency || 'TWD',
     paidBy: getMember(input.paidBy) ? input.paidBy : state.members[0].id,
@@ -548,7 +555,7 @@ function saveLegDetail(fromId, toId, input) {
   } else {
     detail.expenseId = null;
   }
-  const empty = !detail.transitNote && !detail.customDuration && !detail.cost && !detail.expenseId;
+  const empty = !detail.transitNote && !detail.customDuration && !detail.noTime && !detail.unconfirmed && !detail.cost && !detail.expenseId;
   if (empty) delete state.legDetails[key];
   else state.legDetails[key] = detail;
   if (TRAVEL_MODES.some(m => m.value === input.mode)) {
@@ -706,13 +713,14 @@ function setSpotIcon(spotId, icon) {
 }
 
 // 備註視窗按「儲存」：寫回景點、重繪清單與圖釘，並照常存到本機（共享行程同步到雲端）
-function saveSpotNotes(spotId, note, detailedNotes, time = '', reserved = false) {
+function saveSpotNotes(spotId, note, detailedNotes, time = '', reserved = false, tentative = false) {
   const found = findSpot(spotId);
   if (!found) return false;
   found.spot.note = note.trim();
   found.spot.detailedNotes = detailedNotes.replace(/\s+$/, '');
   found.spot.time = /^\d{2}:\d{2}$/.test(time) ? time : '';
   found.spot.reserved = Boolean(reserved && found.spot.time);
+  found.spot.tentative = Boolean(tentative);
   ui.flashSpotId = spotId;
   commit();
   return true;
@@ -929,7 +937,8 @@ function getDayTravelSec(day) {
   for (const { from, to } of getDayLegs(day)) {
     const sec = getLegDurationSec(from, to);
     if (sec === null) {
-      if (getLegMode(from, to).value === 'CUSTOM') continue; // 自訂交通沒填時間就不計入
+      // 選了「不填時間」或自訂交通沒填時間就不計入
+      if (getLegDetail(from, to)?.noTime || getLegMode(from, to).value === 'CUSTOM') continue;
       return null;
     }
     total += sec;
@@ -1220,6 +1229,8 @@ function renderSpotCard(spot, index, total) {
             <span class="spot-name">${escapeHtml(spot.name)}</span>
           </button>
           <div class="spot-chips">
+            ${spot.tentative ? `<button class="time-chip tentative" data-action="edit-spot-time"
+              title="景點尚未確認（點一下修改）" aria-label="景點尚未確認，點一下修改">？待確認</button>` : ''}
             ${spot.time ? `<button class="time-chip ${spot.reserved ? 'reserved' : ''}" data-action="edit-spot-time"
               title="${spot.reserved ? '預約時間，需準時抵達' : '預計抵達時間'}（點一下修改）"
               aria-label="${spot.reserved ? '預約' : '預計'} ${spot.time}，點一下修改">${ICONS.clock}${spot.reserved ? '預約 ' : ''}${spot.time}</button>` : ''}
@@ -1274,8 +1285,9 @@ function renderLegContent(fromSpot, toSpot) {
   const key = getPairKey(fromSpot, toSpot);
   const modesOpen = ui.legModesKey === key;
   const detail = getLegDetail(fromSpot, toSpot);
-  const custom = detail?.customDuration > 0 ? detail.customDuration * 60 : null;
+  const custom = !detail?.noTime && detail?.customDuration > 0 ? detail.customDuration * 60 : null;
   const isCustomMode = mode.value === 'CUSTOM';
+  const noTime = Boolean(detail?.noTime) || (isCustomMode && !custom);
   const leg = apiKey && !isCustomMode ? legCache.get(getLegKey(fromSpot, toSpot, mode.value)) : null;
   const hasDetails = mode.value === 'TRANSIT' && leg?.status === 'ok' && leg.transitSteps?.length > 0;
   const detailsOpen = hasDetails && ui.legDetailsKey === key;
@@ -1290,17 +1302,18 @@ function renderLegContent(fromSpot, toSpot) {
   if (custom) {
     // 手動時間時省略距離，讓劃線的 Google 預估放得下
     timeHtml = `<strong class="leg-custom-time" title="手動設定的時間">${formatDuration(custom)}</strong>${apiText ? `<s class="leg-api-time" title="Google Maps 預估">${apiText}</s>` : ''}`;
+  } else if (noTime) {
+    // 不填時間：只顯示交通方式與距離
+    timeHtml = `<span class="leg-notime">${escapeHtml(mode.label)}</span>${distText}`;
   } else if (leg?.status === 'ok') {
     timeHtml = `<strong>${apiText}</strong>${distText}`;
   }
   let info;
   if (timeHtml) {
-    const title = escapeHtml(`${mode.label}${custom ? `，手動設定 ${formatDuration(custom)}` : ''}${apiText ? `，Google 預估 ${apiText}` : ''}${leg?.description ? `，經 ${leg.description}` : ''}`);
+    const title = escapeHtml(`${mode.label}${noTime ? '，不填時間' : ''}${custom ? `，手動設定 ${formatDuration(custom)}` : ''}${apiText && !noTime ? `，Google 預估 ${apiText}` : ''}${leg?.description ? `，經 ${leg.description}` : ''}`);
     info = hasDetails
       ? `<button class="leg-info as-btn" data-action="toggle-leg-details" aria-expanded="${detailsOpen}" title="${title}">${timeHtml}</button>`
       : `<span class="leg-info" title="${title}">${timeHtml}</span>`;
-  } else if (isCustomMode) {
-    info = `<button class="leg-info as-btn muted" data-action="edit-leg">自訂交通・設定時間</button>`;
   } else if (!apiKey) {
     info = `<span class="leg-info muted">設定地圖金鑰後顯示交通時間</span>`;
   } else if (!leg || leg.status === 'loading') {
@@ -1324,8 +1337,10 @@ function renderLegContent(fromSpot, toSpot) {
     ? `<button class="leg-tag cost" data-action="edit-leg" title="票價（未列入結算）">${formatCurrency(cost.amount, cost.currency)}</button>` : '';
   // 有自訂資訊時記帳標籤移到第二行，第一行才放得下手動時間與劃線的 Google 預估
   const badge = renderExpenseBadge(getLegRef(fromSpot, toSpot), `${fromSpot.name} → ${toSpot.name}`);
-  const tagsRow = Boolean(notePill || costPill || custom);
-  const tags = tagsRow ? `<div class="leg-tags">${notePill}${costPill}<span class="leg-tags-badge">${badge}</span></div>` : '';
+  const pendingPill = detail?.unconfirmed
+    ? `<button class="leg-tag pending" data-action="edit-leg" title="交通尚未確認（還沒訂票或還沒決定）">？待確認</button>` : '';
+  const tagsRow = Boolean(pendingPill || notePill || costPill || custom);
+  const tags = tagsRow ? `<div class="leg-tags">${pendingPill}${notePill}${costPill}<span class="leg-tags-badge">${badge}</span></div>` : '';
   return `
     <div class="leg-mobile">
       <a class="leg-pill" href="${dirUrl}" target="_blank" rel="noopener" aria-label="用 Google 地圖導航：${mode.label}">
@@ -2329,16 +2344,16 @@ function selectRecentPlace(place) {
 }
 
 // 有自訂圖示時圖釘顯示圖示，否則顯示「天數-順序」
-function createPinElement(dayIndex, spotIndex, dimmed, icon) {
+function createPinElement(dayIndex, spotIndex, dimmed, icon, tentative) {
   const wrap = document.createElement('div');
   wrap.className = `pin-wrap${dimmed ? ' dimmed' : ''}`;
-  wrap.innerHTML = `<div class="pin ${icon && SPOT_ICON_ART[icon] ? 'has-art' : ''}" style="--c:${getDayColor(dayIndex)}"><span class="${icon ? 'pin-art' : ''}">${renderSpotIcon(icon, `${dayIndex + 1}-${spotIndex + 1}`)}</span></div>`;
+  wrap.innerHTML = `<div class="pin ${icon && SPOT_ICON_ART[icon] ? 'has-art' : ''}${tentative ? ' tentative' : ''}" style="--c:${getDayColor(dayIndex)}"><span class="${icon ? 'pin-art' : ''}">${renderSpotIcon(icon, `${dayIndex + 1}-${spotIndex + 1}`)}</span>${tentative ? '<b class="pin-q" aria-hidden="true">?</b>' : ''}</div>`;
   return wrap;
 }
 
 function getMarkerTitle({ dayIndex, spot }) {
   const time = spot.time ? `${spot.reserved ? '預約 ' : ''}${spot.time} ` : '';
-  return `${getDayLabel(dayIndex)}・${time}${spot.name}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`; // 圖釘提示只放時間與簡短備註
+  return `${getDayLabel(dayIndex)}・${time}${spot.name}${spot.tentative ? '（待確認）' : ''}${spot.note.trim() ? `\n${spot.note.trim()}` : ''}`; // 圖釘提示只放時間與簡短備註
 }
 
 function updateMarkerTitle(found) {
@@ -2359,7 +2374,7 @@ function syncMarkers() {
         marker.addListener('gmp-click', () => onMarkerClick(spot.id));
         markers.set(spot.id, marker);
       }
-      marker.content = createPinElement(dayIndex, index, dimmed, spot.icon);
+      marker.content = createPinElement(dayIndex, index, dimmed, spot.icon, spot.tentative);
       marker.title = getMarkerTitle({ dayIndex, spot });
       marker.zIndex = dimmed ? 1 : 10;
     });
@@ -2577,6 +2592,7 @@ function openNoteModal(spotId, focus) {
   document.getElementById('note-time-row').hidden = false;
   document.getElementById('note-time').value = spot.time;
   document.getElementById('note-reserved').checked = spot.reserved;
+  document.getElementById('note-tentative').checked = spot.tentative;
   updateNoteTimeState();
   if (focus === 'time') {
     document.getElementById('note-time').focus();
@@ -2642,7 +2658,8 @@ function submitNoteModal() {
   const spotId = noteModal.spotId;
   if (!spotId) return;
   const ok = saveSpotNotes(spotId, document.getElementById('note-short').value, document.getElementById('note-detail').value,
-    document.getElementById('note-time').value, document.getElementById('note-reserved').checked);
+    document.getElementById('note-time').value, document.getElementById('note-reserved').checked,
+    document.getElementById('note-tentative').checked);
   noteModal.returnFocus = null;
   closeNoteModal();
   if (ok) document.querySelector(`.spot[data-spot-id="${spotId}"] .note-chip`)?.focus();
@@ -2829,8 +2846,10 @@ function openLegModal(fromId, toId) {
   form.elements.paidBy.innerHTML = state.members.map(m => `<option value="${m.id}">${escapeHtml(getMemberName(m))}</option>`).join('');
   form.elements.paidBy.value = getMember(detail.paidBy) ? detail.paidBy : state.members[0].id;
   form.elements.addToSettlement.checked = Boolean(cost?.inSettlement || detail.addToSettlement);
-  form.elements.timeMode.value = detail.customDuration > 0 ? 'manual' : 'api';
+  form.elements.timeMode.value = detail.noTime ? 'none' : detail.customDuration > 0 ? 'manual'
+    : getLegMode(from, to).value === 'CUSTOM' ? 'none' : 'api';
   form.elements.customDuration.value = detail.customDuration || '';
+  form.elements.unconfirmed.checked = Boolean(detail.unconfirmed);
   updateLegModalState();
   form.hidden = false;
   document.getElementById('leg-backdrop').hidden = false;
@@ -2847,7 +2866,7 @@ function updateLegModalState() {
   const leg = mode === 'CUSTOM' ? null : legCache.get(getLegKey(from, to, mode));
   const apiRadio = form.querySelector('input[name="timeMode"][value="api"]');
   apiRadio.disabled = mode === 'CUSTOM';
-  if (apiRadio.disabled) form.elements.timeMode.value = 'manual';
+  if (apiRadio.disabled && form.elements.timeMode.value === 'api') form.elements.timeMode.value = 'none';
   document.getElementById('leg-api-estimate').textContent = mode === 'CUSTOM'
     ? '自訂交通沒有預估時間'
     : leg?.status === 'ok' ? `（${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}）`
@@ -2874,6 +2893,8 @@ function submitLegModal() {
   const form = legModal.el;
   const manual = form.elements.timeMode.value === 'manual';
   saveLegDetail(legModal.from, legModal.to, {
+    noTime: form.elements.timeMode.value === 'none',
+    unconfirmed: form.elements.unconfirmed.checked,
     mode: form.elements.mode.value,
     transitNote: form.elements.transitNote.value,
     customDuration: manual ? Number(form.elements.customDuration.value) : null,
@@ -2890,7 +2911,7 @@ function submitLegModal() {
 function resetLegModal() {
   const form = legModal.el;
   form.elements.mode.value = getTravelMode().value;
-  form.elements.timeMode.value = 'api';
+  form.elements.timeMode.value = form.elements.mode.value === 'CUSTOM' ? 'none' : 'api';
   form.elements.customDuration.value = '';
   updateLegModalState();
 }
@@ -3804,7 +3825,9 @@ function getLegExport(from, to) {
     description: ok ? leg.description : '',
     transitSteps: ok ? leg.transitSteps || [] : [],
     // 自訂資訊（transportMode 即 mode）
-    customDuration: getLegDetail(from, to)?.customDuration || null,
+    customDuration: getLegDetail(from, to)?.noTime ? null : getLegDetail(from, to)?.customDuration || null,
+    noTime: Boolean(getLegDetail(from, to)?.noTime),
+    unconfirmed: Boolean(getLegDetail(from, to)?.unconfirmed),
     transitNote: getLegDetail(from, to)?.transitNote || '',
     cost: getLegCost(getLegDetail(from, to))?.amount ?? null,
     currency: getLegCost(getLegDetail(from, to))?.currency || null,
@@ -3856,10 +3879,12 @@ function renderHandbookExpenses(ref) {
 function renderHandbookLeg(from, to, print) {
   const leg = getLegExport(from, to);
   const apiTime = leg.durationSec !== null ? `${formatDuration(leg.durationSec)}・${formatDistance(leg.distanceMeters)}` : '';
-  const time = leg.customDuration
+  const time = leg.noTime
+    ? `${escapeHtml(leg.modeLabel)}${leg.distanceMeters ? `・${formatDistance(leg.distanceMeters)}` : ''}（不計時間）`
+    : leg.customDuration
     ? `${formatDuration(leg.customDuration * 60)}（手動）${apiTime ? `<small class="hb-api">Google 預估 ${apiTime}</small>` : ''}`
     : apiTime || '交通時間未計算';
-  const extra = [leg.transitNote && `<span class="hb-tag">${escapeHtml(leg.transitNote).replace(/\n/g, '<br>')}</span>`,
+  const extra = [leg.unconfirmed && `<span class="hb-tag hb-pending">？待確認</span>`, leg.transitNote && `<span class="hb-tag">${escapeHtml(leg.transitNote).replace(/\n/g, '<br>')}</span>`,
     leg.cost && !leg.inSettlement && `<span class="hb-tag">票價 ${formatCurrency(leg.cost, leg.currency)}</span>`].filter(Boolean).join('');
   const steps = leg.transitSteps.length ? `
       <details class="hb-transit" ${print ? 'open' : ''}>
@@ -3888,7 +3913,7 @@ function buildHandbook({ print = false } = {}) {
       const card = `<li class="hb-spot">
           <span class="hb-icon" style="background:${spot.icon ? '#FFFFFF' : getDayColor(i)}">${renderSpotIcon(spot.icon, j + 1)}</span>
           <div class="hb-spot-body">
-            <h3>${spot.time ? `<span class="hb-time ${spot.reserved ? 'reserved' : ''}">${spot.reserved ? '預約 ' : ''}${spot.time}</span>` : ''}${escapeHtml(spot.name)}</h3>
+            <h3>${spot.time ? `<span class="hb-time ${spot.reserved ? 'reserved' : ''}">${spot.reserved ? '預約 ' : ''}${spot.time}</span>` : ''}${escapeHtml(spot.name)}${spot.tentative ? '<span class="hb-tag hb-pending">？待確認</span>' : ''}</h3>
             ${spot.note.trim() ? `<p class="hb-note">${escapeHtml(spot.note.trim())}</p>` : ''}
             ${spot.detailedNotes.trim() ? `<div class="hb-detail">${renderNoteText(spot.detailedNotes)}</div>` : ''}
             ${renderHandbookExpenses(getSpotRef(spot))}
@@ -3968,6 +3993,7 @@ const HANDBOOK_CSS = `
 .hb-leg-time { font-weight:900; }
 .hb-api { margin-left:6px; font-weight:500; color:var(--muted); text-decoration:line-through; }
 .hb-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+.hb-pending { background:#fff; border-style:dashed; margin-left:6px; vertical-align:middle; }
 .hb-tag { padding:1px 8px; border:1.5px solid var(--ink); border-radius:999px; background:var(--yellow-soft); font-size:12px; font-weight:700; }
 .hb-transit { margin-top:6px; }
 .hb-transit summary { cursor:pointer; font-size:12px; font-weight:700; color:var(--muted); }
