@@ -124,6 +124,14 @@
 
     <main class="map-wrap">
       <div id="map"></div>
+      <div class="no-map" id="no-map" hidden>
+        <div class="no-map-card">
+          <span class="no-map-icon" aria-hidden="true">🗺️</span>
+          <h2>地圖需要 Google Maps 金鑰</h2>
+          <p>沒有金鑰也能看行程：景點、時間、備註、記帳都照常顯示。地圖、交通時間和搜尋地點需要金鑰；每段交通可以點「在 Google 地圖看路線」。</p>
+          <button type="button" class="btn-primary" data-action="open-key-settings">設定金鑰</button>
+        </div>
+      </div>
       <div class="map-tools">
         <button class="map-chip route-toggle" id="route-toggle" type="button" aria-pressed="true" hidden>
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/></svg>

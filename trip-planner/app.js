@@ -1318,7 +1318,7 @@ function renderLegContent(fromSpot, toSpot) {
       ? `<button class="leg-info as-btn" data-action="toggle-leg-details" aria-expanded="${detailsOpen}" title="${title}">${timeHtml}</button>`
       : `<span class="leg-info" title="${title}">${timeHtml}</span>`;
   } else if (!apiKey) {
-    info = `<span class="leg-info muted">設定地圖金鑰後顯示交通時間</span>`;
+    info = `<a class="leg-info muted leg-gmaps-link" href="${escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode))}" target="_blank" rel="noopener">在 Google 地圖看路線</a>`;
   } else if (!leg || leg.status === 'loading') {
     info = `<span class="leg-info muted">計算中…</span>`;
   } else {
@@ -1329,7 +1329,7 @@ function renderLegContent(fromSpot, toSpot) {
       <button class="seg-btn ${m.value === mode.value ? 'active' : ''}" data-action="set-leg-mode" data-mode="${m.value}"
         aria-pressed="${m.value === mode.value}" title="${m.label}" aria-label="${m.label}">${ICONS[m.value]}<span>${m.label}</span></button>`).join('');
   const dirUrl = escapeHtml(getGoogleMapsDirUrl(fromSpot, toSpot, mode));
-  const pillText = timeHtml || `<span class="leg-dist">${isCustomMode ? '自訂交通' : !apiKey ? '路線' : leg?.status === 'error' ? '查看路線' : '計算中…'}</span>`;
+  const pillText = timeHtml || `<span class="leg-dist">${isCustomMode ? '自訂交通' : !apiKey ? '看路線' : leg?.status === 'error' ? '查看路線' : '計算中…'}</span>`;
   const editBtn = `<button class="icon-btn leg-edit-btn" data-action="edit-leg" title="編輯交通（車次、票價、時間）"
       aria-label="編輯 ${escapeHtml(fromSpot.name)} 到 ${escapeHtml(toSpot.name)} 的交通">${ICONS.edit}</button>`;
   // 自訂資訊標籤：車次／備註、票價（已加入結算的票價由記帳標籤顯示，不重複）
@@ -1876,13 +1876,14 @@ function getApiKey() {
 // cancelable：地圖已正常載入、只是想查看或更換金鑰時，可以取消回到地圖
 function showSetup(error, { cancelable = false } = {}) {
   document.getElementById('setup').hidden = false;
+  document.body.classList.add('setup-open'); // 手機：設定頁是全螢幕，暫時藏起浮動導覽列與行程面板
   const el = document.getElementById('setup-error');
   el.hidden = !error;
   el.textContent = error || '';
   const input = document.getElementById('setup-key');
   input.value = getApiKey();
   document.getElementById('setup-clear').hidden = !getStoredApiKey();
-  document.getElementById('setup-cancel').hidden = !cancelable;
+  document.getElementById('setup-cancel').hidden = !cancelable && !document.body.classList.contains('no-map-mode');
   document.getElementById('imgur-key').value = getImgurClientId();
   document.getElementById('imgur-clear').hidden = !getImgurClientId();
   document.getElementById('imgur-status').hidden = true;
@@ -1890,8 +1891,19 @@ function showSetup(error, { cancelable = false } = {}) {
   input.select();
 }
 
+document.querySelector('#no-map [data-action="open-key-settings"]').addEventListener('click', () => showSetup('', { cancelable: true }));
+
+// 沒有金鑰：不擋住畫面，行程照常顯示，地圖區放說明卡（分享給沒有金鑰的朋友看行程）
+function showNoMap() {
+  document.getElementById('no-map').hidden = false;
+  document.body.classList.add('no-map-mode');
+  searchInput.placeholder = '搜尋地點需要地圖金鑰';
+  setSheetSnap('half'); // 手機：行程面板拉高一點，不要只露出一小截
+}
+
 function hideSetup() {
   document.getElementById('setup').hidden = true;
+  document.body.classList.remove('setup-open');
 }
 
 document.getElementById('setup-cancel').addEventListener('click', hideSetup);
@@ -4566,5 +4578,5 @@ if (sharedTripId) joinSharedTrip();
 if (apiKey) {
   loadGoogleMaps(apiKey).then(initMap).catch(err => showSetup(err.message));
 } else {
-  showSetup();
+  showNoMap();
 }

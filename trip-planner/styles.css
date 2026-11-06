@@ -1961,3 +1961,42 @@ button.spot-index:hover { transform: scale(1.12); }
   .spot.lifted .spot-main { background: var(--primary-soft); box-shadow: 0 6px 0 var(--ink); }
   .spot.lifted .spot-row { overflow: visible; }
 }
+
+/* 沒有金鑰：地圖區顯示說明卡，行程照常可看 */
+.no-map {
+  position: absolute; inset: 0; z-index: 5;
+  display: grid; place-items: center; padding: 24px;
+  background:
+    linear-gradient(var(--bg), var(--bg)) padding-box,
+    repeating-linear-gradient(45deg, transparent 0 14px, rgba(24, 24, 27, .04) 14px 28px);
+}
+.no-map::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(rgba(24, 24, 27, .05) 1px, transparent 1px), linear-gradient(90deg, rgba(24, 24, 27, .05) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.no-map-card {
+  position: relative; max-width: 380px; padding: 22px 22px 20px;
+  background: var(--paper); border: var(--line-strong); border-radius: 20px; box-shadow: var(--shadow-pop);
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+}
+.no-map-icon { font-size: 30px; line-height: 1; }
+.no-map-card h2 { margin: 0; font-size: 18px; font-weight: 900; }
+.no-map-card p { margin: 0; font-size: 13px; line-height: 1.7; color: var(--muted); }
+.leg-gmaps-link { text-decoration: underline; text-underline-offset: 2px; }
+.leg-gmaps-link:hover { color: var(--ink); }
+
+/* 金鑰設定在手機上不要超出畫面 */
+@media (max-width: 760px) {
+  .setup { position: fixed; z-index: 990; padding: 16px 12px 32px; place-items: start center; } /* 手機：蓋住整個畫面（含底部行程面板）的設定頁 */
+  .setup-card { padding: 18px; min-width: 0; }
+  .setup-card p, .setup-card ol { overflow-wrap: anywhere; }
+  .setup-form { min-width: 0; }
+  .setup-form input { min-width: 0; flex: 1; }
+  .no-map { place-items: start center; padding: 84px 12px 0; }
+  .no-map-card { padding: 16px; gap: 8px; }
+  .no-map-card p { font-size: 12.5px; }
+}
+@media (max-width: 760px) {
+  body.setup-open .sidebar, body.setup-open .topbar { visibility: hidden; }
+}
