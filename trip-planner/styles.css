@@ -1690,7 +1690,10 @@ button.spot-index:hover { transform: scale(1.12); }
   .day-head .day-remove { margin-right: -6px; }
 
   /* 景點卡：拿掉把手與「⋯」，向左滑露出「編輯」「刪除」 */
-  .drag-handle, .spot-more { display: none; }
+  .spot-more { display: none; }
+  /* 手機：⠿ 把手按住直接拖曳排序（44px 高的觸控範圍） */
+  .drag-handle { width: 28px; height: 44px; margin: -8px -4px -8px -8px; color: var(--muted); cursor: grab; }
+  .drag-handle svg { width: 18px; height: 18px; }
   .spot-row { overflow: hidden; border-radius: 10px; touch-action: pan-y; }
   .spot-main {
     z-index: 1;

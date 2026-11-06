@@ -1795,7 +1795,7 @@ const drag = { spotId: null, dayId: null, toIndex: null };
 
 dayListEl.addEventListener('pointerdown', e => {
   const handle = e.target.closest('.drag-handle');
-  if (handle) handle.closest('.spot').draggable = true;
+  if (handle && !isMobile()) handle.closest('.spot').draggable = true; // 手機用自己的觸控拖曳
 });
 
 dayListEl.addEventListener('dragstart', e => {
@@ -3502,6 +3502,14 @@ dayListEl.addEventListener('pointerdown', e => {
   if (ui.swipeSpotId === li.dataset.spotId) return; // 已經滑開的卡片不拖
   if (li.closest('.spot-list').querySelectorAll(':scope > .spot').length < 2) return;
   reorder = { spotId: li.dataset.spotId, li, x: e.clientX, y: e.clientY, pointerY: e.clientY, pointerId: e.pointerId, active: false };
+  const handle = e.target.closest('.drag-handle');
+  if (handle) {
+    // 左邊的 ⠿ 把手：按下就直接拖（touch-action: none，不會被捲動搶走）
+    e.preventDefault();
+    try { handle.setPointerCapture(e.pointerId); } catch {}
+    startReorder();
+    return;
+  }
   reorder.timer = setTimeout(() => startReorder(), LONG_PRESS_MS);
 });
 
@@ -3584,7 +3592,7 @@ function finishReorder(commitMove) {
 window.addEventListener('pointermove', e => {
   if (!reorder || e.pointerId !== reorder.pointerId) return;
   if (!reorder.active) {
-    if (Math.hypot(e.clientX - reorder.x, e.clientY - reorder.y) > 8) cancelReorderPress(); // 手指移動了：是捲動或左滑
+    if (Math.hypot(e.clientX - reorder.x, e.clientY - reorder.y) > 12) cancelReorderPress(); // 手指移動了：是捲動或左滑
     return;
   }
   reorder.pointerY = e.clientY;
