@@ -1948,3 +1948,13 @@ button.spot-index:hover { transform: scale(1.12); }
 }
 .note-label:has(#note-img-btn) label, .note-preview-toggle { white-space: nowrap; }
 @media (max-width: 760px) { .note-label:has(#note-img-btn) small { display: none; } }
+
+/* 手機：長按拖曳調整順序 */
+@media (max-width: 760px) {
+  .spot-main { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+  .spot-list.reordering > .leg { display: none; }
+  .spot-list.reordering > .spot { transition: transform .18s ease; }
+  .spot-list.reordering > .spot.lifted { position: relative; z-index: 20; transition: none; }
+  .spot.lifted .spot-main { background: var(--primary-soft); box-shadow: 0 6px 0 var(--ink); }
+  .spot.lifted .spot-row { overflow: visible; }
+}

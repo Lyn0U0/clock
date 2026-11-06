@@ -1219,7 +1219,7 @@ function renderSpotCard(spot, index, total) {
     <li class="spot ${menuOpen ? 'menu-open' : ''} ${ui.swipeSpotId === spot.id ? 'swiped' : ''}" data-spot-id="${spot.id}">
       <div class="spot-row">
       <div class="swipe-actions" aria-hidden="${ui.swipeSpotId !== spot.id}">
-        <button data-action="open-spot-edit" tabindex="-1">${ICONS.note}編輯</button>
+        <button data-action="open-spot-edit" tabindex="-1">${ICONS.more}更多</button>
         <button class="danger" data-action="remove-spot" tabindex="-1">${ICONS.trash}刪除</button>
       </div>
       <div class="spot-main">
@@ -3426,7 +3426,7 @@ document.getElementById('next-stop').addEventListener('click', e => {
   setSheetSnap('half');
 });
 
-// ---------- 景點卡向左滑：露出「編輯」「刪除」 ----------
+// ---------- 景點卡向左滑：露出「更多」「刪除」 ----------
 const SWIPE_WIDTH = 152;
 let swipe = null;
 
@@ -3473,6 +3473,138 @@ const endSwipe = e => {
 };
 window.addEventListener('pointerup', endSwipe);
 window.addEventListener('pointercancel', endSwipe);
+
+// ---------- 手機：長按景點卡拖曳，調整同一天的順序 ----------
+// 按住約 0.4 秒卡片浮起（震動提示），上下拖到想要的位置放開；拖曳中暫時收起路段，只看景點順序。
+// 用 touch 事件追蹤手指（可以 preventDefault 擋住捲動），滑鼠／觸控筆則用 pointer 事件。
+const LONG_PRESS_MS = 400;
+let reorder = null;
+
+function findScrollParent(el) {
+  for (let node = el.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) return node;
+  }
+  return document.scrollingElement;
+}
+
+function cancelReorderPress() {
+  if (reorder && !reorder.active) {
+    clearTimeout(reorder.timer);
+    reorder = null;
+  }
+}
+
+dayListEl.addEventListener('pointerdown', e => {
+  const row = e.target.closest('.spot-row');
+  if (!isMobile() || !row || e.target.closest('.swipe-actions') || reorder) return;
+  const li = row.closest('.spot');
+  if (ui.swipeSpotId === li.dataset.spotId) return; // 已經滑開的卡片不拖
+  if (li.closest('.spot-list').querySelectorAll(':scope > .spot').length < 2) return;
+  reorder = { spotId: li.dataset.spotId, li, x: e.clientX, y: e.clientY, pointerY: e.clientY, pointerId: e.pointerId, active: false };
+  reorder.timer = setTimeout(() => startReorder(), LONG_PRESS_MS);
+});
+
+function startReorder() {
+  const r = reorder;
+  if (!r || swipe?.started) { reorder = null; return; }
+  swipe = null; // 長按成立後就不是左滑
+  r.active = true;
+  r.list = r.li.closest('.spot-list');
+  r.scroller = findScrollParent(r.list);
+  const grabTop = r.li.getBoundingClientRect().top;
+  r.list.classList.add('reordering'); // 收起路段，卡片排在一起
+  r.li.classList.add('lifted');
+  navigator.vibrate?.(15);
+  const scrollerTop = () => (r.scroller === document.scrollingElement ? 0 : r.scroller.getBoundingClientRect().top);
+  r.toContent = clientY => clientY - scrollerTop() + r.scroller.scrollTop;
+  r.items = [...r.list.querySelectorAll(':scope > .spot')].map(el => {
+    const rect = el.getBoundingClientRect();
+    return { el, top: r.toContent(rect.top), height: rect.height };
+  });
+  r.from = r.items.findIndex(it => it.el === r.li);
+  r.to = r.from;
+  const me = r.items[r.from];
+  // 手指抓在卡片的哪裡：收起路段後版面會位移，讓卡片維持在手指下
+  r.grab = r.toContent(r.y) - r.toContent(grabTop);
+  const next = r.items[1];
+  r.step = me.height + (next ? Math.max(0, next.top - (r.items[0].top + r.items[0].height)) : 8);
+  updateReorder();
+  const loop = () => {
+    if (reorder !== r || !r.active) return;
+    // 手指靠近捲動區上下緣時自動捲動
+    const box = r.scroller === document.scrollingElement ? { top: 0, bottom: innerHeight } : r.scroller.getBoundingClientRect();
+    const edge = 56;
+    if (r.pointerY < box.top + edge) r.scroller.scrollTop -= 8;
+    else if (r.pointerY > box.bottom - edge) r.scroller.scrollTop += 8;
+    updateReorder();
+    r.raf = requestAnimationFrame(loop);
+  };
+  r.raf = requestAnimationFrame(loop);
+}
+
+function updateReorder() {
+  const r = reorder;
+  const me = r.items[r.from];
+  // 卡片只在這一天的範圍內移動
+  const minTop = r.items[0].top;
+  const maxTop = Math.max(...r.items.map(it => it.top + it.height)) - me.height;
+  const top = Math.min(maxTop, Math.max(minTop, r.toContent(r.pointerY) - r.grab));
+  me.el.style.transform = `translateY(${top - me.top}px)`;
+  const center = top + me.height / 2;
+  let to = 0;
+  r.items.forEach((it, i) => { if (i !== r.from && it.top + it.height / 2 < center) to++; });
+  if (top >= maxTop - 1) to = r.items.length - 1; // 拖到底／頂（卡片高度不同時中心點可能過不了最後一張）
+  if (top <= minTop + 1) to = 0;
+  r.to = to;
+  r.items.forEach((it, i) => {
+    if (i === r.from) return;
+    let shift = 0;
+    if (r.from < i && i <= to) shift = -r.step;
+    else if (to <= i && i < r.from) shift = r.step;
+    it.el.style.transform = shift ? `translateY(${shift}px)` : '';
+  });
+}
+
+function finishReorder(commitMove) {
+  const r = reorder;
+  if (!r) return;
+  clearTimeout(r.timer);
+  reorder = null;
+  if (!r.active) return;
+  cancelAnimationFrame(r.raf);
+  sheet.suppressClick = true; // 放開手指產生的點擊不要觸發卡片
+  setTimeout(() => { sheet.suppressClick = false; }, 300);
+  r.items.forEach(it => { it.el.style.transform = ''; });
+  r.li.classList.remove('lifted');
+  r.list.classList.remove('reordering');
+  if (commitMove && r.to !== r.from) moveSpot(r.spotId, r.to);
+}
+
+window.addEventListener('pointermove', e => {
+  if (!reorder || e.pointerId !== reorder.pointerId) return;
+  if (!reorder.active) {
+    if (Math.hypot(e.clientX - reorder.x, e.clientY - reorder.y) > 8) cancelReorderPress(); // 手指移動了：是捲動或左滑
+    return;
+  }
+  reorder.pointerY = e.clientY;
+});
+window.addEventListener('touchmove', e => {
+  if (!reorder?.active) return;
+  e.preventDefault(); // 拖曳中不要捲動底部面板
+  reorder.pointerY = e.touches[0].clientY;
+}, { passive: false });
+window.addEventListener('pointerup', e => { if (reorder && e.pointerId === reorder.pointerId) finishReorder(true); });
+window.addEventListener('pointercancel', e => {
+  // 觸控拖曳中瀏覽器可能送出 pointercancel，交給 touchend 收尾
+  if (reorder && e.pointerId === reorder.pointerId && !reorder.active) cancelReorderPress();
+});
+window.addEventListener('touchend', () => { if (reorder?.active) finishReorder(true); });
+window.addEventListener('touchcancel', () => { if (reorder?.active) finishReorder(false); });
+// 長按不要跳出系統選單
+dayListEl.addEventListener('contextmenu', e => {
+  if (isMobile() && e.target.closest('.spot-row')) e.preventDefault();
+});
 // 點其他地方收回滑開的卡片
 document.addEventListener('click', e => {
   if (sheet.suppressClick) return; // 剛滑完放開手指產生的點擊
