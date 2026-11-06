@@ -2000,3 +2000,24 @@ button.spot-index:hover { transform: scale(1.12); }
 @media (max-width: 760px) {
   body.setup-open .sidebar, body.setup-open .topbar { visibility: hidden; }
 }
+
+/* 只能觀看：藏起所有編輯操作 */
+.view-badge {
+  display: inline-flex; align-items: center; align-self: flex-start; margin-top: 2px; padding: 1px 9px;
+  border: 2px solid var(--ink); border-radius: 999px; background: #E0F2FE; font-size: 12px; font-weight: 900; white-space: nowrap;
+}
+body.view-only :is(
+  [data-action="add-day"], [data-action="add-member"], [data-action="add-expense"], [data-action="remove-spot"],
+  [data-action="remove-day"], [data-action="remove-member"], [data-action="remove-expense"], [data-action="toggle-spot-menu"],
+  [data-action="edit-leg"], [data-action="toggle-leg-modes"], [data-action="start-sharing"], [data-action="import-json"],
+  .drag-handle, .spot-more, .leg-edit-btn, .swipe-actions, .note-chip.empty, .day-remove,
+  #note-img-btn, #note-preview-toggle, .note-modal .note-foot button[type="submit"], .note-modal .note-hint, .note-shortcut,
+  .todo-form, .todo-remove, .expense-panel-foot [data-action="add-expense"]
+) { display: none !important; }
+body.view-only :is([data-action="toggle-icon-picker"], [data-action="edit-spot-time"], .leg-mode-btn) { pointer-events: none; }
+body.view-only .no-map-card p::after { content: ''; }
+body.view-only input:disabled, body.view-only select:disabled, body.view-only textarea:disabled { opacity: 1; color: var(--ink); -webkit-text-fill-color: var(--ink); cursor: default; }
+body.view-only :is(.expense-badge:not(.has), .sidebar-header .hint, #note-count, #note-time-clear,
+  .note-modal .leg-check:has(input:not(:checked)), .note-time-row.view-empty, .note-field.view-empty) { display: none !important; }
+body.view-only .day-empty { font-size: 0; }
+body.view-only .day-empty::after { content: '這天還沒有安排景點'; font-size: 13px; }

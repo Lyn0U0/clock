@@ -169,6 +169,9 @@ const DAY_COLORS = ['#3B82F6', '#FB7185', '#FACC15', '#6EE7B7', '#FB923C', '#A78
  * ========================================================================== */
 
 const sharedTripId = getTripIdFromHash();
+// 只能觀看模式（簡易版）：隱藏所有編輯操作、不寫回雲端。
+// 注意：這只是介面上的限制，把網址的 &view 拿掉就能編輯；真正的權限分級需要 Firebase 登入與安全規則。
+const VIEW_ONLY = Boolean(sharedTripId) && isViewHash();
 let state = loadState();
 
 // 只影響畫面、不需要儲存的狀態
@@ -204,9 +207,14 @@ function getStorageKey() {
   return sharedTripId ? `${STATE_STORAGE}:trip-${sharedTripId}` : STATE_STORAGE;
 }
 
+// 共享連結：#trip-行程ID；只能觀看的連結再加上 &view
 function getTripIdFromHash() {
-  const match = location.hash.match(/^#trip-([A-Za-z0-9]{10,40})$/);
+  const match = location.hash.match(/^#trip-([A-Za-z0-9]{10,40})(&view)?$/);
   return match ? match[1] : null;
+}
+
+function isViewHash() {
+  return /^#trip-[A-Za-z0-9]{10,40}&view$/.test(location.hash);
 }
 
 function loadState() {
@@ -288,7 +296,7 @@ function saveState() {
   } catch {
     // 無法儲存時（例如無痕模式）就只保留在記憶體中
   }
-  queueCloudSave();
+  if (!VIEW_ONLY) queueCloudSave(); // 只能觀看：不寫回雲端
 }
 
 // 每個會改變資料的操作最後都呼叫 commit()：儲存 → 重繪清單與地圖
@@ -1800,7 +1808,7 @@ dayListEl.addEventListener('pointerdown', e => {
 
 dayListEl.addEventListener('dragstart', e => {
   const card = e.target.closest('.spot');
-  if (!card) return;
+  if (!card || VIEW_ONLY) return;
   drag.spotId = card.dataset.spotId;
   drag.dayId = card.closest('.spot-list').dataset.dayId;
   e.dataTransfer.effectAllowed = 'move';
@@ -2093,6 +2101,7 @@ function getDefaultDayId() {
 
 // name：已知地點名稱時（例如從搜尋選取）直接帶入
 function openAddSpotForm(latLng, placeId, name) {
+  if (VIEW_ONLY) return;
   const lat = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
   const lng = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
   addCard.draft = { lat, lng, placeId: placeId || null };
@@ -2650,6 +2659,11 @@ function openNoteModal(spotId, focus) {
   short.value = spot.note;
   detail.value = spot.detailedNotes;
   startNoteImages(spot.detailedNotes);
+  if (VIEW_ONLY) requestAnimationFrame(() => { // 只能觀看：直接顯示排版後的內容，空的欄位不顯示
+    setNotePreview(true);
+    document.getElementById('note-time-row').classList.toggle('view-empty', !spot.time && !spot.tentative);
+    markEmptyViewFields();
+  });
   updateNoteCounter();
   setNotePreview(false);
   ui.spotMenuId = null;
@@ -2701,6 +2715,7 @@ function openDayNoteModal(dayId) {
   short.value = day.note;
   document.getElementById('note-detail').value = day.detailedNotes;
   startNoteImages(day.detailedNotes);
+  if (VIEW_ONLY) requestAnimationFrame(() => { setNotePreview(true); markEmptyViewFields(); });
   updateNoteCounter();
   setNotePreview(false);
   noteModal.el.hidden = false;
@@ -3455,7 +3470,7 @@ function setSwipedSpot(spotId) {
 
 dayListEl.addEventListener('pointerdown', e => {
   const row = e.target.closest('.spot-row');
-  if (!isMobile() || !row || e.target.closest('.swipe-actions')) return;
+  if (VIEW_ONLY || !isMobile() || !row || e.target.closest('.swipe-actions')) return;
   const spotId = row.closest('.spot').dataset.spotId;
   swipe = { x: e.clientX, y: e.clientY, spotId, main: row.querySelector('.spot-main'), base: ui.swipeSpotId === spotId ? -SWIPE_WIDTH : 0, started: false, id: e.pointerId };
 });
@@ -3509,7 +3524,7 @@ function cancelReorderPress() {
 
 dayListEl.addEventListener('pointerdown', e => {
   const row = e.target.closest('.spot-row');
-  if (!isMobile() || !row || e.target.closest('.swipe-actions') || reorder) return;
+  if (VIEW_ONLY || !isMobile() || !row || e.target.closest('.swipe-actions') || reorder) return;
   const li = row.closest('.spot');
   if (ui.swipeSpotId === li.dataset.spotId) return; // 已經滑開的卡片不拖
   if (li.closest('.spot-list').querySelectorAll(':scope > .spot').length < 2) return;
@@ -3784,7 +3799,7 @@ function setSyncStatus(status, message = '') {
 
 // ---------- 寫入 ----------
 function queueCloudSave() {
-  if (!isSyncReady()) return;
+  if (VIEW_ONLY || !isSyncReady()) return; // 只能觀看：任何情況都不寫回雲端
   clearTimeout(sync.timer);
   sync.timer = setTimeout(flushCloudSave, 400);
   if (sync.status !== 'offline') setSyncStatus('saving');
@@ -3792,6 +3807,7 @@ function queueCloudSave() {
 
 async function flushCloudSave() {
   sync.timer = null;
+  if (VIEW_ONLY) return;
   const batch = sync.db.batch();
   let writes = 0;
 
@@ -4023,7 +4039,7 @@ window.addEventListener('online', () => {
 
 // 換到另一個行程連結時重新載入
 window.addEventListener('hashchange', () => {
-  if (getTripIdFromHash() !== sharedTripId) location.reload();
+  if (getTripIdFromHash() !== sharedTripId || isViewHash() !== VIEW_ONLY) location.reload();
 });
 
 // ---------- 建立 / 離開共享行程 ----------
@@ -4038,6 +4054,7 @@ function withExpiry(data) {
 
 function backfillExpiry(expenseRefs) {
   sync.needsExpiryBackfill = false;
+  if (VIEW_ONLY) return;
   const batch = sync.db.batch();
   const expireAt = firebase.firestore.Timestamp.fromDate(sync.expireAt);
   batch.set(sync.tripRef, { expireAt }, { merge: true });
@@ -4080,8 +4097,12 @@ function leaveSharedTrip() {
   location.reload();
 }
 
+function getShareUrl(view) {
+  return `${location.origin}${location.pathname}${location.search}#trip-${sharedTripId}${view ? '&view' : ''}`;
+}
+
 async function copyShareLink(btn) {
-  const url = location.href;
+  const url = getShareUrl(VIEW_ONLY || btn.dataset.view === '1');
   try {
     await navigator.clipboard.writeText(url);
     btn.textContent = '已複製';
@@ -4112,7 +4133,7 @@ function renderSyncBar() {
   }
   const texts = {
     connecting: '正在載入共享行程…',
-    synced: '已同步・拿到連結的人都能一起編輯',
+    synced: VIEW_ONLY ? '只能觀看・行程有更新會自動顯示' : '已同步・拿到編輯連結的人都能一起編輯',
     saving: '儲存中…',
     offline: '離線中，恢復連線後會自動同步',
     error: sync.message
@@ -4121,7 +4142,10 @@ function renderSyncBar() {
   el.innerHTML = `
     <span class="sync-dot" aria-hidden="true"></span>
     <span class="sync-text" role="status">${escapeHtml(texts[sync.status] || '')}</span>
-    <button class="sync-btn primary" data-action="copy-link">複製連結</button>
+    ${VIEW_ONLY
+      ? '<button class="sync-btn primary" data-action="copy-link" data-view="1">複製觀看連結</button>'
+      : `<button class="sync-btn primary" data-action="copy-link" title="拿到的人可以一起編輯">複製編輯連結</button>
+         <button class="sync-btn" data-action="copy-link" data-view="1" title="拿到的人只能看（簡易版：懂的人改網址仍可編輯）">複製觀看連結</button>`}
     <button class="sync-btn" data-action="leave-trip">離開</button>`;
 }
 
@@ -4572,6 +4596,58 @@ importInput.addEventListener('change', async () => {
  * 10. 啟動
  * ========================================================================== */
 
+/* ---------- 只能觀看模式 ---------- */
+const VIEW_BLOCKED_ACTIONS = new Set(['edit-leg', 'edit-spot-time', 'toggle-spot-menu', 'open-spot-edit', 'toggle-icon-picker',
+  'set-spot-icon', 'toggle-leg-modes', 'set-leg-mode', 'remove-spot', 'remove-day', 'remove-member', 'remove-expense', 'add-day',
+  'add-member', 'add-expense', 'move-up', 'move-down', 'repeat-spot', 'copy-spot', 'start-sharing', 'import-json', 'reset-leg']);
+
+// 所有輸入框變成唯讀（行程名稱、日期、旅伴、記帳、待辦…）；金鑰設定與下載保存不受影響
+function lockViewInputs() {
+  document.querySelectorAll('input, select, textarea').forEach(el => {
+    if (el.closest('#setup, #export-modal') || el.id === 'place-search' || el.type === 'file') return;
+    if (!el.disabled) el.disabled = true;
+  });
+}
+
+function markEmptyViewFields() {
+  const short = document.getElementById('note-short');
+  short.closest('.note-field').classList.toggle('view-empty', !short.value.trim());
+  const detail = document.getElementById('note-detail');
+  detail.closest('.note-field').classList.toggle('view-empty', !detail.value.trim());
+  const close = document.querySelector('#note-modal .note-foot [data-action="close-note"]');
+  close.textContent = '關閉';
+  close.focus(); // 焦點放在視窗裡，Esc 才能關閉
+}
+
+function setupViewOnly() {
+  if (!VIEW_ONLY) return;
+  document.body.classList.add('view-only');
+  const badge = document.createElement('span');
+  badge.className = 'view-badge';
+  badge.textContent = '👀 只能觀看';
+  badge.title = '這是觀看連結：可以看行程、備註和記帳，不能修改';
+  document.querySelector('.trip-meta')?.appendChild(badge);
+  // 擋下所有會修改資料的按鈕（按鈕本身也用 CSS 藏起來，這裡是保險）
+  document.addEventListener('click', e => {
+    const btn = e.target.closest('[data-action]');
+    if ((btn && VIEW_BLOCKED_ACTIONS.has(btn.dataset.action)) || e.target.closest('[data-todo-remove]')) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+  document.addEventListener('submit', e => {
+    if (!e.target.closest('#setup')) e.preventDefault();
+  }, true);
+  let queued = false;
+  new MutationObserver(() => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => { queued = false; lockViewInputs(); });
+  }).observe(document.body, { childList: true, subtree: true });
+  lockViewInputs();
+}
+
+setupViewOnly();
 placeForViewport();
 render();
 if (sharedTripId) joinSharedTrip();
